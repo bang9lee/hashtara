@@ -1,0 +1,66 @@
+name: hashtara
+description: A social networking app with Cupertino design
+version: 1.0.0+1
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  
+  # 상태 관리
+  flutter_riverpod: ^2.4.9
+  
+  # Firebase - 버전 업데이트됨
+  firebase_core: ^2.25.4
+  firebase_auth: ^4.17.4
+  cloud_firestore: ^4.15.4
+  firebase_storage: ^11.6.5
+  firebase_messaging: ^14.7.15
+  
+  # 구글 로그인
+  google_sign_in: ^6.2.1
+  
+  # 이미지 관련
+  cached_network_image: ^3.3.1
+  image_picker: ^1.0.7
+  flutter_svg: ^2.0.9
+  
+  # 유틸리티
+  intl: ^0.19.0
+  uuid: ^4.2.2
+  path_provider: ^2.1.2
+  shared_preferences: ^2.2.2
+  logger: ^2.0.2+1
+  
+  # UI 관련
+  shimmer: ^3.0.0
+  pull_to_refresh_flutter3: ^2.0.2
+  
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.3
+  build_runner: ^2.4.8
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/images/
+    - assets/icons/
+    - assets/animations/
+    
+  fonts:
+    - family: SFPro
+      fonts:
+        - asset: assets/fonts/SF-Pro.ttf
+          weight: 400
+        - asset: assets/fonts/SF-Pro-Italic.ttf
+          weight: 400
+          style: italic
