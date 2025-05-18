@@ -1,13 +1,15 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../constants/app_colors.dart';
-import '../../../providers/auth_provider.dart'; 
-import '../../../providers/profile_provider.dart';
+import '../../../providers/auth_provider.dart';
+import '../../../providers/chat_provider.dart';
 import '../../../providers/feed_provider.dart';
-import '../profile/profile_screen.dart';
-import 'home_screen.dart';
+import '../../../providers/profile_provider.dart';
+import '../feed/chat_list_screen.dart'; 
 import 'create_post_screen.dart';
+import 'home_screen.dart';
 import 'hashtag_explore_screen.dart';
+import '../profile/profile_screen.dart';
 
 // 하단 탭 인덱스를 저장하는 프로바이더
 final bottomNavIndexProvider = StateProvider<int>((ref) => 0);
@@ -47,8 +49,12 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
         // 사용자 게시물 리스트 갱신
         final refresh3 = ref.refresh(userPostsProvider(user.uid));
         
+        // 채팅 관련 데이터 갱신
+        final refresh4 = ref.refresh(userChatsProvider(user.uid));
+        final refresh5 = ref.refresh(unreadMessagesCountProvider(user.uid));
+        
         // Lint 경고 제거를 위한 사용
-        debugPrint('Provider 갱신 완료: ${refresh1.hashCode}, ${refresh2.hashCode}, ${refresh3.hashCode}');
+        debugPrint('Provider 갱신 완료: ${refresh1.hashCode}, ${refresh2.hashCode}, ${refresh3.hashCode}, ${refresh4.hashCode}, ${refresh5.hashCode}');
         
         // 프로필 정보 명시적 로딩
         ref.read(profileControllerProvider.notifier).loadProfile(user.uid);
@@ -67,6 +73,12 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
     
     // 현재 사용자 정보
     final currentUser = ref.watch(currentUserProvider);
+    
+    // 읽지 않은 메시지 수
+    final unreadMessagesCount = currentUser.whenData((user) => user != null ? 
+      ref.watch(unreadMessagesCountProvider(user.id)) : 
+      const AsyncValue<int>.data(0)
+    );
     
     return CupertinoTabScaffold(
       tabBar: CupertinoTabBar(
@@ -88,26 +100,19 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
             icon: Icon(CupertinoIcons.search),
             activeIcon: Icon(CupertinoIcons.search_circle_fill),
           ),
-          // 게시물 작성 탭
-          BottomNavigationBarItem(
+          // 게시물 작성 탭 - 아이콘 수정
+          const BottomNavigationBarItem(
             icon: Padding(
-              padding: const EdgeInsets.only(top: 5.0),
+              padding: EdgeInsets.only(top: 5.0),
               child: SizedBox(
                 width: 40,
                 height: 40,
-                child: Image.asset(
-                  'assets/images/center.png',
-                  width: 40,
-                  height: 40,
-                ),
+                child: Icon(CupertinoIcons.plus_circle_fill, size: 40),
               ),
             ),
           ),
           // 채팅 탭
-          const BottomNavigationBarItem(
-            icon: Icon(CupertinoIcons.bubble_left),
-            activeIcon: Icon(CupertinoIcons.bubble_left_fill),
-          ),
+          _buildChatTabItem(unreadMessagesCount),
           // 프로필 탭
           BottomNavigationBarItem(
             icon: currentUser.when(
@@ -179,6 +184,14 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
             return; // 인덱스 변경 없음
           }
           
+          // 채팅 탭으로 이동할 때 데이터 갱신
+          if (index == 3) {
+            _refreshAllData();
+            
+            // UI 강제 갱신 트리거
+            ref.read(uiRefreshProvider.notifier).state += 1;
+          }
+          
           // 프로필 탭으로 이동할 때 데이터 갱신
           if (index == 4) {
             _refreshAllData();
@@ -208,14 +221,9 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
               builder: (_) => const HomeScreen(),
             );
           case 3:
-            // 채팅 화면 (임시로 홈 화면 표시)
+            // 채팅 화면
             return CupertinoTabView(
-              builder: (_) => const Center(
-                child: Text(
-                  '채팅 화면 (개발 중)',
-                  style: TextStyle(color: AppColors.white),
-                ),
-              ),
+              builder: (_) => const ChatsListScreen(), // 올바른 클래스 사용
             );
           case 4:
             return CupertinoTabView(
@@ -245,6 +253,90 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
             );
         }
       },
+    );
+  }
+  
+  // 채팅 탭 아이템 위젯 (읽지 않은 메시지 뱃지 표시)
+  BottomNavigationBarItem _buildChatTabItem(AsyncValue<AsyncValue<int>> unreadCountAsync) {
+    return BottomNavigationBarItem(
+      icon: Stack(
+        children: [
+          const Icon(CupertinoIcons.bubble_left),
+          // 읽지 않은 메시지 수
+          unreadCountAsync.when(
+            data: (unreadCountValue) => unreadCountValue.when(
+              data: (count) => count > 0 ? 
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.all(1),
+                    decoration: BoxDecoration(
+                      color: CupertinoColors.systemRed,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 12,
+                      minHeight: 12,
+                    ),
+                    child: Text(
+                      count > 99 ? '99+' : '$count',
+                      style: const TextStyle(
+                        color: AppColors.white,
+                        fontSize: 8,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ) : const SizedBox.shrink(),
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+            loading: () => const SizedBox.shrink(),
+            error: (_, __) => const SizedBox.shrink(),
+          ),
+        ],
+      ),
+      activeIcon: Stack(
+        children: [
+          const Icon(CupertinoIcons.bubble_left_fill),
+          // 읽지 않은 메시지 수
+          unreadCountAsync.when(
+            data: (unreadCountValue) => unreadCountValue.when(
+              data: (count) => count > 0 ? 
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.all(1),
+                    decoration: BoxDecoration(
+                      color: CupertinoColors.systemRed,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 12,
+                      minHeight: 12,
+                    ),
+                    child: Text(
+                      count > 99 ? '99+' : '$count',
+                      style: const TextStyle(
+                        color: AppColors.white,
+                        fontSize: 8,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ) : const SizedBox.shrink(),
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+            loading: () => const SizedBox.shrink(),
+            error: (_, __) => const SizedBox.shrink(),
+          ),
+        ],
+      ),
     );
   }
 }

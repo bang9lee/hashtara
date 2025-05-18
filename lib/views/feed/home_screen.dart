@@ -4,11 +4,10 @@ import 'package:pull_to_refresh_flutter3/pull_to_refresh_flutter3.dart';
 import '../../../constants/app_colors.dart';
 import '../../../constants/app_strings.dart';
 import '../../../providers/auth_provider.dart';
-import '../../../providers/feed_provider.dart'; // feed_provider 추가
+import '../../../providers/feed_provider.dart';
 import '../../../providers/hashtag_channel_provider.dart';
 import '../../../models/hashtag_channel_model.dart';
-import '../widgets/channel_card.dart';
-import '../widgets/post_card.dart'; // post_card 위젯 추가
+import '../widgets/post_card.dart';
 import 'hashtag_explore_screen.dart';
 import 'create_post_screen.dart';
 import 'hashtag_channel_detail_screen.dart';
@@ -20,8 +19,11 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAliveClientMixin {
   final RefreshController _refreshController = RefreshController(initialRefresh: false);
+  
+  @override
+  bool get wantKeepAlive => true; // 상태 유지를 위한 설정
   
   @override
   void initState() {
@@ -39,25 +41,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Future<void> _onRefresh() async {
     try {
       // 인기 채널 새로고침
-      final popularChannelsRefresh = await ref.refresh(popularHashtagChannelsProvider.future);
+      final refreshPopular = ref.refresh(popularHashtagChannelsProvider);
+      debugPrint('인기 채널 새로고침: ${refreshPopular.hashCode}');
       
       // 피드 게시물 새로고침
-      final feedPostsRefresh = await ref.refresh(feedPostsProvider.future);
+      final refreshFeed = ref.refresh(feedPostsProvider);
+      debugPrint('피드 새로고침: ${refreshFeed.hashCode}');
       
       // 로그인 된 경우 구독 채널도 새로고침
       final user = ref.read(currentUserProvider).value;
       if (user != null) {
-        final userChannelsRefresh = await ref.refresh(userSubscribedChannelsProvider(user.id).future);
-        // 경고 제거를 위해 변수 사용
-        debugPrint('채널 새로고침 상태 확인: $userChannelsRefresh');
+        final refreshChannels = ref.refresh(userSubscribedChannelsProvider(user.id));
+        debugPrint('사용자 채널 새로고침: ${refreshChannels.hashCode}');
       }
       
-      // 경고 제거를 위해 변수 사용
-      debugPrint('인기 채널 새로고침 상태 확인: $popularChannelsRefresh');
-      debugPrint('피드 새로고침 상태 확인: $feedPostsRefresh');
-      
       // 딜레이 추가 (실제 API 요청 느낌 주기)
-      await Future.delayed(const Duration(seconds: 1));
+      await Future.delayed(const Duration(milliseconds: 800));
       debugPrint('새로고침 완료');
     } catch (e) {
       debugPrint('새로고침 실패: $e');
@@ -68,25 +67,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+    
     final currentUser = ref.watch(currentUserProvider);
     
-    // 인기 해시태그 채널
+    // 인기 해시태그 채널 (캐싱 적용된 상태)
     final popularChannels = ref.watch(popularHashtagChannelsProvider);
     
     // 피드 게시물 추가
     final feedPosts = ref.watch(feedPostsProvider);
     
-    // 사용자가 구독한 해시태그 채널
-    final subscribedChannels = currentUser.whenOrNull(
+    // 사용자가 구독한 해시태그 채널 (조건부 로드)
+    final subscribedChannels = currentUser.maybeWhen(
       data: (user) => user != null
           ? ref.watch(userSubscribedChannelsProvider(user.id))
           : null,
+      orElse: () => null,
     );
     
     return CupertinoPageScaffold(
       backgroundColor: AppColors.darkBackground,
       navigationBar: CupertinoNavigationBar(
-        backgroundColor: AppColors.primaryPurple,
+        backgroundColor: const Color.fromRGBO(124, 95, 255, 0),
         border: const Border(
           bottom: BorderSide(color: AppColors.separator),
         ),
@@ -186,113 +188,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
               ),
               
-              // 피드 게시물 섹션 추가
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        '최신 게시물',
-                        style: TextStyle(
-                          color: AppColors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      CupertinoButton(
-                        padding: EdgeInsets.zero,
-                        onPressed: () {
-                          // 최신 게시물 더보기 (미구현)
-                        },
-                        child: const Text(
-                          '더보기',
-                          style: TextStyle(color: AppColors.primaryPurple),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              
-              // 피드 게시물 목록
-              feedPosts.when(
-                data: (posts) {
-                  if (posts.isEmpty) {
-                    return const SliverToBoxAdapter(
-                      child: Padding(
-                        padding: EdgeInsets.all(16.0),
-                        child: Center(
-                          child: Column(
-                            children: [
-                              Icon(
-                                CupertinoIcons.photo,
-                                size: 40,
-                                color: AppColors.textSecondary,
-                              ),
-                              SizedBox(height: 8),
-                              Text(
-                                '아직 게시물이 없습니다.\n첫 게시물을 작성해보세요!',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: AppColors.textEmphasis,
-                                  fontSize: 15,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  }
-                  
-                  return SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        final post = posts[index];
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16.0,
-                            vertical: 8.0,
-                          ),
-                          child: PostCard(
-                            post: post,
-                            onProfileTap: () {
-                              // 프로필 페이지로 이동
-                            },
-                          ),
-                        );
-                      },
-                      childCount: posts.length > 3 ? 3 : posts.length, // 최대 3개만 표시
-                    ),
-                  );
-                },
-                loading: () => const SliverToBoxAdapter(
-                  child: Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(16.0),
-                      child: CupertinoActivityIndicator(),
-                    ),
-                  ),
-                ),
-                error: (error, stack) {
-                  debugPrint('피드 로드 에러: $error');
-                  return SliverToBoxAdapter(
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Text(
-                          '게시물을 불러오는 중 오류가 발생했습니다: $error',
-                          style: const TextStyle(color: AppColors.textEmphasis),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-              
-              // 구독한 채널 섹션
+              // 1. 내 채널 섹션 (로그인된 사용자만 표시)
               if (currentUser.valueOrNull != null) ...[
                 SliverToBoxAdapter(
                   child: Padding(
@@ -332,76 +228,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
                 
                 // 구독 채널 목록
-                subscribedChannels != null
-                    ? subscribedChannels.when(
-                        data: (channels) {
-                          if (channels.isEmpty) {
-                            return const SliverToBoxAdapter(
-                              child: Padding(
-                                padding: EdgeInsets.all(16.0),
-                                child: Center(
-                                  child: Column(
-                                    children: [
-                                      Icon(
-                                        CupertinoIcons.number, // hashtag에서 number로 수정
-                                        size: 40,
-                                        color: AppColors.textSecondary,
-                                      ),
-                                      SizedBox(height: 8),
-                                      Text(
-                                        '아직 구독한 채널이 없습니다.\n관심있는 해시태그를 탐색해보세요!',
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          color: AppColors.textEmphasis,
-                                          fontSize: 15,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            );
-                          }
-                          
-                          return SliverToBoxAdapter(
-                            child: SizedBox(
-                              height: 140,
-                              child: ListView.builder(
-                                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                                scrollDirection: Axis.horizontal,
-                                itemCount: channels.length,
-                                itemBuilder: (context, index) {
-                                  final channel = channels[index];
-                                  return _buildChannelCard(channel);
-                                },
-                              ),
-                            ),
-                          );
-                        },
-                        loading: () => const SliverToBoxAdapter(
-                          child: Center(
-                            child: Padding(
-                              padding: EdgeInsets.all(16.0),
-                              child: CupertinoActivityIndicator(),
-                            ),
-                          ),
-                        ),
-                        error: (_, __) => const SliverToBoxAdapter(
-                          child: Center(
-                            child: Padding(
-                              padding: EdgeInsets.all(16.0),
-                              child: Text(
-                                '구독 채널을 불러오는 중 오류가 발생했습니다.',
-                                style: TextStyle(color: AppColors.textEmphasis),
-                              ),
-                            ),
-                          ),
-                        ),
-                      )
-                    : const SliverToBoxAdapter(child: SizedBox()),
+                if (subscribedChannels != null)
+                  _buildSubscribedChannelsSection(subscribedChannels),
               ],
               
-              // 인기 채널 섹션
+              // 2. 인기 해시태그 섹션
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
@@ -439,81 +270,287 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
               ),
               
-              // 인기 채널 목록
-              popularChannels.when(
-                data: (channels) {
-                  if (channels.isEmpty) {
-                    return const SliverToBoxAdapter(
-                      child: Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(16.0),
-                          child: Text(
-                            '아직 채널이 없습니다',
-                            style: TextStyle(color: AppColors.textEmphasis),
-                          ),
+              // 인기 채널 목록 - 로우 형식으로 변경
+              _buildPopularChannelsSection(popularChannels),
+              
+              // 여백
+              const SliverToBoxAdapter(
+                child: SizedBox(height: 16),
+              ),
+              
+              // 3. 최신 게시물 섹션
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 0.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        '최신 게시물',
+                        style: TextStyle(
+                          color: AppColors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    );
-                  }
-                  
-                  return SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        final channel = channels[index];
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                          child: ChannelCard(
-                            channel: channel,
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                CupertinoPageRoute(
-                                  builder: (context) => HashtagChannelDetailScreen(
-                                    channelId: channel.id,
-                                    channelName: channel.name,
-                                  ),
-                                ),
-                              );
-                            },
-                            onSubscribe: currentUser.whenOrNull(
-                              data: (user) => user != null
-                                  ? () {
-                                      ref.read(hashtagChannelControllerProvider.notifier).subscribeToChannel(
-                                        user.id,
-                                        channel.id,
-                                      );
-                                    }
-                                  : null,
-                            ),
-                          ),
-                        );
-                      },
-                      childCount: channels.length,
-                    ),
-                  );
-                },
-                loading: () => const SliverToBoxAdapter(
-                  child: Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(32.0),
-                      child: CupertinoActivityIndicator(),
-                    ),
-                  ),
-                ),
-                error: (_, __) => const SliverToBoxAdapter(
-                  child: Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(32.0),
-                      child: Text(
-                        '인기 채널을 불러오는 중 오류가 발생했습니다.',
-                        style: TextStyle(color: AppColors.textEmphasis),
+                      CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        onPressed: () {
+                          // 최신 게시물 더보기 (미구현)
+                        },
+                        child: const Text(
+                          '더보기',
+                          style: TextStyle(color: AppColors.primaryPurple),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
               ),
+              
+              // 피드 게시물 목록
+              _buildFeedPostsSection(feedPosts),
             ],
           ),
+        ),
+      ),
+    );
+  }
+  
+  // 구독 채널 섹션
+  Widget _buildSubscribedChannelsSection(AsyncValue<List<HashtagChannelModel>> subscribedChannels) {
+    return subscribedChannels.when(
+      data: (channels) {
+        if (channels.isEmpty) {
+          return const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(
+                      CupertinoIcons.number,
+                      size: 40,
+                      color: AppColors.textSecondary,
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      '아직 구독한 채널이 없습니다.\n관심있는 해시태그를 탐색해보세요!',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppColors.textEmphasis,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+        
+        return SliverToBoxAdapter(
+          child: SizedBox(
+            height: 140,
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              scrollDirection: Axis.horizontal,
+              itemCount: channels.length,
+              itemBuilder: (context, index) {
+                final channel = channels[index];
+                return _buildChannelCard(channel);
+              },
+            ),
+          ),
+        );
+      },
+      loading: () => const SliverToBoxAdapter(
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.all(16.0),
+            child: CupertinoActivityIndicator(),
+          ),
+        ),
+      ),
+      error: (error, stack) => SliverToBoxAdapter(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(
+              '구독 채널을 불러오는 중 오류가 발생했습니다: $error',
+              style: const TextStyle(color: AppColors.textEmphasis),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  
+  // 인기 채널 섹션
+  Widget _buildPopularChannelsSection(AsyncValue<List<HashtagChannelModel>> popularChannels) {
+    return popularChannels.when(
+      data: (channels) {
+        if (channels.isEmpty) {
+          return const SliverToBoxAdapter(
+            child: Center(
+              child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text(
+                  '아직 채널이 없습니다',
+                  style: TextStyle(color: AppColors.textEmphasis),
+                ),
+              ),
+            ),
+          );
+        }
+        
+        // 로우 형식으로 변경
+        return SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Wrap(
+              spacing: 8.0, // 가로 간격
+              runSpacing: 12.0, // 세로 간격
+              children: channels.map((channel) {
+                return _buildHashtagPill(
+                  tag: channel.name,
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      CupertinoPageRoute(
+                        builder: (context) => HashtagChannelDetailScreen(
+                          channelId: channel.id,
+                          channelName: channel.name,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              }).toList(),
+            ),
+          ),
+        );
+      },
+      loading: () => const SliverToBoxAdapter(
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.all(32.0),
+            child: CupertinoActivityIndicator(),
+          ),
+        ),
+      ),
+      error: (error, stack) => SliverToBoxAdapter(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32.0),
+            child: Text(
+              '인기 채널을 불러오는 중 오류가 발생했습니다: $error',
+              style: const TextStyle(color: AppColors.textEmphasis),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  
+  // 피드 게시물 섹션
+  Widget _buildFeedPostsSection(AsyncValue<List<dynamic>> feedPosts) {
+    return feedPosts.when(
+      data: (posts) {
+        if (posts.isEmpty) {
+          return const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(
+                      CupertinoIcons.photo,
+                      size: 40,
+                      color: AppColors.textSecondary,
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      '아직 게시물이 없습니다.\n첫 게시물을 작성해보세요!',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppColors.textEmphasis,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+        
+        return SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              final post = posts[index];
+              return Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16.0,
+                  vertical: 8.0,
+                ),
+                child: PostCard(
+                  post: post,
+                  // PostCard 위젯 내부에서 탭 핸들링을 처리하므로 별도의 onTap 콜백은 제거
+                ),
+              );
+            },
+            childCount: posts.length,
+          ),
+        );
+      },
+      loading: () => const SliverToBoxAdapter(
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.all(16.0),
+            child: CupertinoActivityIndicator(),
+          ),
+        ),
+      ),
+      error: (error, stack) {
+        debugPrint('피드 로드 에러: $error');
+        return SliverToBoxAdapter(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(
+                '게시물을 불러오는 중 오류가 발생했습니다: $error',
+                style: const TextStyle(color: AppColors.textEmphasis),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+  
+  // 해시태그 핀 위젯 (로우 형식)
+  Widget _buildHashtagPill({required String tag, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+        decoration: BoxDecoration(
+          color: AppColors.primaryPurple,
+          borderRadius: BorderRadius.circular(20.0),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '#$tag',
+              style: const TextStyle(
+                color: AppColors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -555,7 +592,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 shape: BoxShape.circle,
               ),
               child: const Icon(
-                CupertinoIcons.number, // hashtag에서 number로 수정
+                CupertinoIcons.number,
                 color: AppColors.white,
                 size: 24,
               ),

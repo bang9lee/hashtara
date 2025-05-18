@@ -7,6 +7,7 @@ import '../../../providers/auth_provider.dart';
 import '../../../providers/feed_provider.dart';
 import '../../../providers/hashtag_channel_provider.dart';
 import '../common/custom_button.dart';
+import '../../../models/hashtag_channel_model.dart';
 
 class CreatePostScreen extends ConsumerStatefulWidget {
   final String? channelId; // 특정 채널에서 게시물 작성 시 채널 ID
@@ -59,10 +60,11 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
   }
   
   // 해시태그 추가
-  void _addHashtag() {
+  void _addHashtag() async {
     final hashtag = _hashtagController.text.trim();
     
     if (hashtag.isNotEmpty) {
+      // 불필요한 문자열 보간 수정
       final formattedHashtag = hashtag.startsWith('#') ? hashtag : '#$hashtag';
       
       if (!_selectedHashtags.contains(formattedHashtag)) {
@@ -70,7 +72,31 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
           _selectedHashtags.add(formattedHashtag);
           _hashtagController.clear();
         });
+        
+        // 해시태그 채널 자동 생성
+        await _createHashtagChannel(formattedHashtag);
       }
+    }
+  }
+  
+  // 해시태그 채널 생성 메서드
+  Future<void> _createHashtagChannel(String hashtag) async {
+    try {
+      final channelName = hashtag.startsWith('#') ? hashtag.substring(1) : hashtag;
+      
+      // 새 채널 모델 생성
+      final newChannel = HashtagChannelModel(
+        id: '', 
+        name: channelName,
+        description: '$channelName에 대한 게시물 모음',
+        createdAt: DateTime.now(),
+      );
+      
+      // 채널 저장
+      await ref.read(hashtagChannelControllerProvider.notifier).createChannel(newChannel);
+      debugPrint('해시태그 채널 생성 성공: $channelName');
+    } catch (e) {
+      debugPrint('해시태그 채널 생성 실패: $e');
     }
   }
   
@@ -127,19 +153,22 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
     });
     
     try {
-      // 캡션에 해시태그 추가
+      // 캡션은 해시태그 없이 그대로 사용
       String caption = _captionController.text.trim();
-      if (_selectedHashtags.isNotEmpty) {
-        caption = '$caption ${_selectedHashtags.join(' ')}';
-      }
       
-      debugPrint('게시물 작성 시도: 작성자 ${currentUser.id}, 내용: $caption');
+      debugPrint('게시물 작성 시도: 작성자 ${currentUser.id}, 내용: $caption, 해시태그: ${_selectedHashtags.join(' ')}');
+      
+      // 게시물 생성 전에 모든 해시태그에 대한 채널 생성 시도
+      for (final hashtag in _selectedHashtags) {
+        await _createHashtagChannel(hashtag);
+      }
       
       final postId = await ref.read(postControllerProvider.notifier).createPost(
         userId: currentUser.id,
         caption: caption.isEmpty ? null : caption,
         imageFiles: _selectedImages.isEmpty ? null : _selectedImages,
         location: _locationController.text.isEmpty ? null : _locationController.text.trim(),
+        hashtags: _selectedHashtags.isEmpty ? null : _selectedHashtags,
       );
       
       debugPrint('게시물 작성 결과: $postId');

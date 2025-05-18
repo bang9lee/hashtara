@@ -114,11 +114,38 @@ class FilteredProviderLogger extends ProviderObserver {
   // 필터링할 프로바이더 타입 목록
   final Set<String> _filteredProviderTypes = {
     'StreamProvider<bool>',
-    // 필요시 다른 과도하게 업데이트되는 프로바이더 타입도 추가
+    'FutureProvider<bool>',
+    'StateNotifierProvider<ChannelSubscriptionController, AsyncValue<bool>>',
+    'AutoDisposeStreamProvider<bool>', // 좋아요 상태 프로바이더 필터링
+  };
+  
+  // 필터링할 프로바이더 이름 목록
+  final Set<String> _filteredProviderNames = {
+    'channelSubscription',
+    'channelSubscriptionProvider',
+    'channelSubscriptionControllerProvider',
+    'commentLikeStatus', // 댓글 좋아요 상태 프로바이더 필터링
   };
   
   // 마지막으로 로깅한 시간 저장 (스팸 방지)
   final Map<String, DateTime> _lastLoggedTime = {};
+  
+  // 프로바이더 필터링 통합 메서드
+  bool _shouldFilter(String providerType, String providerName) {
+    // 타입으로 필터링
+    if (_filteredProviderTypes.contains(providerType)) {
+      return true;
+    }
+    
+    // 이름으로 필터링
+    for (final name in _filteredProviderNames) {
+      if (providerName.contains(name)) {
+        return true;
+      }
+    }
+    
+    return false; // 필터링 대상 아님
+  }
   
   @override
   void didUpdateProvider(
@@ -128,20 +155,24 @@ class FilteredProviderLogger extends ProviderObserver {
     ProviderContainer container,
   ) {
     final providerType = provider.runtimeType.toString();
+    final providerName = provider.name ?? providerType;
     
-    // 필터링된 타입이거나 동일 타입의 로그가 최근에 기록되었으면 무시
-    if (_filteredProviderTypes.contains(providerType)) {
-      final now = DateTime.now();
-      final lastTime = _lastLoggedTime[providerType] ?? DateTime(2000);
-      
-      // 1초 이내에 동일 프로바이더 타입의 로그가 있으면 생략
-      if (now.difference(lastTime).inSeconds < 1) {
-        return;
-      }
-      
-      // 시간 업데이트
-      _lastLoggedTime[providerType] = now;
+    // 필터링할 프로바이더인지 확인
+    if (_shouldFilter(providerType, providerName)) {
+      return; // 필터링 대상이면 로깅하지 않음
     }
+    
+    // 마지막 로깅 시간 확인
+    final now = DateTime.now();
+    final lastTime = _lastLoggedTime[providerType] ?? DateTime(2000);
+    
+    // 5초 이내에 동일 프로바이더 타입의 로그가 있으면 생략
+    if (now.difference(lastTime).inSeconds < 5) {
+      return;
+    }
+    
+    // 시간 업데이트
+    _lastLoggedTime[providerType] = now;
     
     // 필터 통과한 프로바이더만 로깅
     logger.d(
@@ -156,10 +187,11 @@ class FilteredProviderLogger extends ProviderObserver {
     ProviderContainer container,
   ) {
     final providerType = provider.runtimeType.toString();
+    final providerName = provider.name ?? providerType;
     
-    // 필터링된 타입이면 무시
-    if (_filteredProviderTypes.contains(providerType)) {
-      return;
+    // 필터링할 프로바이더인지 확인
+    if (_shouldFilter(providerType, providerName)) {
+      return; // 필터링 대상이면 로깅하지 않음
     }
     
     logger.d(
@@ -173,10 +205,11 @@ class FilteredProviderLogger extends ProviderObserver {
     ProviderContainer container,
   ) {
     final providerType = provider.runtimeType.toString();
+    final providerName = provider.name ?? providerType;
     
-    // 필터링된 타입이면 무시
-    if (_filteredProviderTypes.contains(providerType)) {
-      return;
+    // 필터링할 프로바이더인지 확인
+    if (_shouldFilter(providerType, providerName)) {
+      return; // 필터링 대상이면 로깅하지 않음
     }
     
     logger.d(
