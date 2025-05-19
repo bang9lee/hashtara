@@ -27,6 +27,7 @@ class CommentScreen extends ConsumerStatefulWidget {
 class _CommentScreenState extends ConsumerState<CommentScreen> {
   final TextEditingController _commentController = TextEditingController();
   final FocusNode _commentFocusNode = FocusNode();
+  final ScrollController _scrollController = ScrollController(); // 스크롤 컨트롤러 추가
   String? _replyToCommentId;
   String? _replyToUsername;
   bool _isSubmitting = false;
@@ -87,6 +88,7 @@ class _CommentScreenState extends ConsumerState<CommentScreen> {
   void dispose() {
     _commentController.dispose();
     _commentFocusNode.dispose();
+    _scrollController.dispose(); // 스크롤 컨트롤러 해제
     super.dispose();
   }
 
@@ -153,6 +155,16 @@ class _CommentScreenState extends ConsumerState<CommentScreen> {
       
       // 데이터 새로고침
       await _refreshData();
+      
+      // 댓글 작성 후 스크롤을 맨 아래로 이동 (지연 추가)
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (mounted && _scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
       
       debugPrint('댓글 제출 완료');
     } catch (e) {
@@ -275,10 +287,14 @@ class _CommentScreenState extends ConsumerState<CommentScreen> {
                     );
                   }
                   
+                  // 댓글 목록에 스크롤 컨트롤러 연결
                   return ListView.builder(
+                    controller: _scrollController, // 스크롤 컨트롤러 연결
                     padding: const EdgeInsets.all(16.0),
                     itemCount: comments.length,
                     itemBuilder: (context, index) {
+                      // 중요: 정렬은 이미 CommentRepository에서 오름차순으로 정렬됨
+                      // 따라서 여기서는 그대로 사용
                       final comment = comments[index];
                       
                       return _buildCommentItem(
@@ -881,6 +897,7 @@ class _CommentScreenState extends ConsumerState<CommentScreen> {
           ref.read(commentControllerProvider.notifier).toggleLike(
             commentId: comment.id,
             userId: userId,
+            postId: widget.postId, // postId 추가
           );
         },
         child: Row(

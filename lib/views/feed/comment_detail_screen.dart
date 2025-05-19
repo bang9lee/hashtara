@@ -743,47 +743,48 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
 
   // 좋아요 버튼 위젯
   Widget _buildLikeButton(CommentModel comment, String userId, {bool isReply = false}) {
-    // 좋아요 상태 가져오기
-    final likeStatusAsync = ref.watch(
-      commentLikeStatusProvider({'commentId': comment.id, 'userId': userId})
-    );
-    
-    return likeStatusAsync.when(
-      data: (isLiked) => GestureDetector(
-        onTap: () {
-          ref.read(commentControllerProvider.notifier).toggleLike(
-            commentId: comment.id,
-            userId: userId,
-          );
-        },
-        child: Row(
-          children: [
-            Icon(
-              isLiked ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
-              color: isLiked ? CupertinoColors.systemRed : AppColors.textSecondary,
-              size: isReply ? 12 : 14,
-            ),
-            if (comment.likesCount > 0) ...[
-              const SizedBox(width: 4),
-              Text(
-                comment.likesCount.toString(),
-                style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: isReply ? 11 : 12,
-                ),
+  // 좋아요 상태 가져오기
+  final likeStatusAsync = ref.watch(
+    commentLikeStatusProvider({'commentId': comment.id, 'userId': userId})
+  );
+  
+  return likeStatusAsync.when(
+    data: (isLiked) => GestureDetector(
+      onTap: () {
+        ref.read(commentControllerProvider.notifier).toggleLike(
+          commentId: comment.id,
+          userId: userId,
+          postId: widget.postId, // postId 추가
+        );
+      },
+      child: Row(
+        children: [
+          Icon(
+            isLiked ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
+            color: isLiked ? CupertinoColors.systemRed : AppColors.textSecondary,
+            size: isReply ? 12 : 14,
+          ),
+          if (comment.likesCount > 0) ...[
+            const SizedBox(width: 4),
+            Text(
+              comment.likesCount.toString(),
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: isReply ? 11 : 12,
               ),
-            ],
+            ),
           ],
-        ),
+        ],
       ),
-      loading: () => const CupertinoActivityIndicator(radius: 6),
-      error: (_, __) => Icon(
-        CupertinoIcons.heart,
-        color: AppColors.textSecondary,
-        size: isReply ? 12 : 14,
-      ),
-    );
-  }
+    ),
+    loading: () => const CupertinoActivityIndicator(radius: 6),
+    error: (_, __) => Icon(
+      CupertinoIcons.heart,
+      color: AppColors.textSecondary,
+      size: isReply ? 12 : 14,
+    ),
+  );
+}
 
   // 메인 댓글 옵션 메뉴
   void _showCommentOptions(BuildContext context) {

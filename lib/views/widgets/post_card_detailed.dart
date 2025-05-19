@@ -4,9 +4,9 @@ import '../../../constants/app_colors.dart';
 import '../../../models/post_model.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/feed_provider.dart';
-import 'user_avatar.dart';
+import '../widgets/user_avatar.dart';
 import '../../views/profile/profile_screen.dart';
-import '../feed/photo_view_screen.dart'; // PhotoViewScreen import 추가
+import '../feed/photo_view_screen.dart';
 
 class PostCardDetailed extends ConsumerStatefulWidget {
   final PostModel post;
@@ -23,15 +23,32 @@ class PostCardDetailed extends ConsumerStatefulWidget {
 class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
   // 로컬 상태로 좋아요 상태 관리
   bool _isLiked = false;
-  
+  late int _likesCount; // 로컬 좋아요 카운트 상태 추가
+  bool _isLikeInProgress = false; // 좋아요 처리 중 상태 추가
+
   @override
   void initState() {
     super.initState();
+    
+    // 초기 좋아요 상태와 카운트 설정
+    _likesCount = widget.post.likesCount;
     
     // 초기 좋아요 상태 가져오기 (한 번만)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchInitialLikeStatus();
     });
+  }
+  
+  @override
+  void didUpdateWidget(PostCardDetailed oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    
+    // 위젯이 업데이트될 때 likesCount 상태 갱신
+    if (oldWidget.post.likesCount != widget.post.likesCount) {
+      setState(() {
+        _likesCount = widget.post.likesCount;
+      });
+    }
   }
   
   // 초기 좋아요 상태 가져오기
@@ -237,24 +254,65 @@ class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
               ),
             ),
             
-          // 액션 버튼들 (좋아요, 댓글, 공유) - 내용 아래에 표시
+          // 액션 버튼들 (좋아요, 공유) - 내용 아래에 표시
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 12.0),
             child: Row(
               children: [
-                // 좋아요 버튼
+                // 좋아요 버튼 - 로컬 상태 기반
                 GestureDetector(
-                  onTap: () {
+                  onTap: _isLikeInProgress ? null : () {
                     final currentUser = currentUserAsync.valueOrNull;
                     if (currentUser != null) {
-                      // 즉시 UI 업데이트
+                      // 중복 클릭 방지
+                      if (_isLikeInProgress) return;
+                      
                       setState(() {
+                        _isLikeInProgress = true;
                         _isLiked = !_isLiked;
+                        // 좋아요 카운트 즉시 업데이트
+                        _likesCount += _isLiked ? 1 : -1;
                       });
                       
                       // 백엔드에 좋아요 요청 전송
                       ref.read(postControllerProvider.notifier)
-                          .toggleLike(widget.post.id, currentUser.id);
+                          .toggleLike(widget.post.id, currentUser.id)
+                          .then((_) {
+                            // 요청 완료 후 처리 중 상태 해제
+                            if (mounted) {
+                              setState(() {
+                                _isLikeInProgress = false;
+                              });
+                            }
+                          })
+                          .catchError((error) {
+                            // 오류 발생 시 UI 상태 되돌리기
+                            if (mounted) {
+                              setState(() {
+                                _isLiked = !_isLiked;
+                                _likesCount += _isLiked ? 1 : -1;
+                                _isLikeInProgress = false;
+                              });
+                              
+                              // 오류 메시지 표시
+                              if (context.mounted) {
+                                showCupertinoDialog(
+                                  context: context,
+                                  builder: (context) => CupertinoAlertDialog(
+                                    title: const Text('오류'),
+                                    content: const Text('좋아요 처리 중 오류가 발생했습니다'),
+                                    actions: [
+                                      CupertinoDialogAction(
+                                        onPressed: () => Navigator.pop(context),
+                                        child: const Text('확인'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                            }
+                            return null;
+                          });
                     } else {
                       _showLoginRequiredDialog(context);
                     }
@@ -263,27 +321,28 @@ class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
                     duration: const Duration(milliseconds: 300),
                     child: Padding(
                       padding: const EdgeInsets.all(8.0), // 탭 영역 확장
-                      child: Icon(
-                        _isLiked
-                            ? CupertinoIcons.heart_fill
-                            : CupertinoIcons.heart,
-                        color: _isLiked
-                            ? CupertinoColors.systemRed
-                            : AppColors.textEmphasis,
-                        size: 24,
-                      ),
+                      child: _isLikeInProgress
+                          ? const CupertinoActivityIndicator(radius: 10)
+                          : Icon(
+                              _isLiked
+                                  ? CupertinoIcons.heart_fill
+                                  : CupertinoIcons.heart,
+                              color: _isLiked
+                                  ? CupertinoColors.systemRed
+                                  : AppColors.textEmphasis,
+                              size: 24,
+                            ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 4),
-                if (widget.post.likesCount > 0)
-                  Text(
-                    widget.post.likesCount.toString(),
-                    style: const TextStyle(
-                      color: AppColors.textEmphasis,
-                      fontSize: 14,
-                    ),
+                Text(
+                  _likesCount.toString(),
+                  style: const TextStyle(
+                    color: AppColors.textEmphasis,
+                    fontSize: 14,
                   ),
+                ),
                 const SizedBox(width: 16),
 
                 // 공유 버튼

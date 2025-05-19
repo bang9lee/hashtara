@@ -65,7 +65,7 @@ class AuthNavigationNotifier extends StateNotifier<AuthNavigationState> {
     
     state = state.copyWith(
       currentScreen: AuthScreen.setupProfile,
-      isNavigating: true,
+      isNavigating: false,
       userId: userId,
     );
   }

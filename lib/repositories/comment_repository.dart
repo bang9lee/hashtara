@@ -1,31 +1,30 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
-import 'dart:async';
-import 'package:rxdart/rxdart.dart';
 import '../models/comment_model.dart';
 
 class CommentRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   
   // 좋아요 상태 캐시
-  final Map<String, BehaviorSubject<bool>> _likeStatusCache = {};
+  final Map<String, StreamController<bool>> _likeStatusCache = {};
   
-  // 게시물의 댓글 목록 가져오기 (스트림)
+  // 게시물의 댓글 목록 가져오기 (스트림) - 캐싱 최적화
   Stream<List<CommentModel>> getCommentsForPost(String postId) {
     debugPrint('댓글 쿼리 시작: postId=$postId');
     
-    // 댓글 스트림 생성
-    final controller = StreamController<List<CommentModel>>();
+    // 댓글 스트림 생성 (broadcast로 변경)
+    final controller = StreamController<List<CommentModel>>.broadcast();
     
     // 타임아웃 타이머
     Timer? timeoutTimer;
     
     try {
-      // Firestore 쿼리 생성
+      // Firestore 쿼리 생성 - 중요: 오름차순으로 변경 (오래된 댓글이 위에 표시됨)
       final query = _firestore
           .collection('comments')
           .where('postId', isEqualTo: postId)
-          .orderBy('createdAt', descending: true);
+          .orderBy('createdAt', descending: false);  // 여기를 false로 설정
       
       // 구독 객체
       StreamSubscription<QuerySnapshot>? subscription;
@@ -91,22 +90,22 @@ class CommentRepository {
     return controller.stream;
   }
   
-  // 특정 댓글의 대댓글 가져오기 (스트림)
+  // 특정 댓글의 대댓글 가져오기 (스트림) - 캐싱 최적화
   Stream<List<CommentModel>> getRepliesForComment(String commentId) {
     debugPrint('대댓글 쿼리 시작: commentId=$commentId');
     
-    // 대댓글 스트림 생성
-    final controller = StreamController<List<CommentModel>>();
+    // 대댓글 스트림 생성 (broadcast로 변경)
+    final controller = StreamController<List<CommentModel>>.broadcast();
     
     // 타임아웃 타이머
     Timer? timeoutTimer;
     
     try {
-      // Firestore 쿼리 생성
+      // Firestore 쿼리 생성 - 오름차순으로 변경
       final query = _firestore
           .collection('comments')
           .where('parentId', isEqualTo: commentId)
-          .orderBy('createdAt', descending: false);
+          .orderBy('createdAt', descending: false);  // 여기도 false로 설정
       
       // 구독 객체
       StreamSubscription<QuerySnapshot>? subscription;
@@ -172,17 +171,17 @@ class CommentRepository {
     return controller.stream;
   }
   
-  // 댓글 좋아요 상태 가져오기 (초기값 포함한 스트림) - 캐싱 추가
+  // 댓글 좋아요 상태 가져오기 (스트림으로 변경) - 캐싱 최적화
   Stream<bool> getLikeStatusStream(String commentId, String userId) {
     final cacheKey = '$commentId:$userId';
     
-    // 캐시 확인: 이미 존재하는 스트림이면 재활용
-    if (_likeStatusCache.containsKey(cacheKey)) {
-      debugPrint('캐시된 좋아요 상태 스트림 사용: $cacheKey');
+    // 캐시 확인: 이미 존재하는 스트림이면 재사용
+    if (_likeStatusCache.containsKey(cacheKey) && !_likeStatusCache[cacheKey]!.isClosed) {
+      // debugPrint('캐시된 좋아요 상태 스트림 사용: $cacheKey');
       return _likeStatusCache[cacheKey]!.stream;
     }
     
-    debugPrint('새 좋아요 상태 스트림 생성: commentId=$commentId, userId=$userId');
+    // debugPrint('새 좋아요 상태 스트림 생성: commentId=$commentId, userId=$userId');
     
     // 문서 참조
     final docRef = _firestore
@@ -191,44 +190,48 @@ class CommentRepository {
         .collection('likes')
         .doc(userId);
     
-    // 새 BehaviorSubject 생성 (초기값은 일단 false로 설정)
-    final subject = BehaviorSubject<bool>.seeded(false);
-    _likeStatusCache[cacheKey] = subject;
+    // 브로드캐스트 스트림 컨트롤러 생성 (여러 리스너 지원)
+    final controller = StreamController<bool>.broadcast();
+    _likeStatusCache[cacheKey] = controller;
     
     // 초기 상태 확인 (일회성 쿼리)
     docRef.get().then((doc) {
       final exists = doc.exists;
-      subject.add(exists);
+      if (!controller.isClosed) {
+        controller.add(exists);
+      }
     }).catchError((e) {
       debugPrint('좋아요 초기 상태 확인 오류: $e');
-      // 오류 시 기본값 유지
+      // 오류 시 기본값 설정
+      if (!controller.isClosed) {
+        controller.add(false);
+      }
     });
     
     // 실시간 업데이트 구독
     final subscription = docRef.snapshots().listen(
       (doc) {
-        // 상태가 변경된 경우만 업데이트 (중복 방지)
-        if (subject.value != doc.exists) {
-          subject.add(doc.exists);
+        if (!controller.isClosed) {
+          controller.add(doc.exists);
         }
       },
       onError: (e) {
         debugPrint('좋아요 상태 스트림 오류: $e');
         // 오류 시 기본값 설정
-        if (!subject.isClosed) {
-          subject.add(false);
+        if (!controller.isClosed) {
+          controller.add(false);
         }
       },
     );
     
     // 구독 정리 핸들러 설정
-    subject.onCancel = () {
+    controller.onCancel = () {
       subscription.cancel();
       _likeStatusCache.remove(cacheKey);
-      debugPrint('좋아요 상태 스트림 해제: $cacheKey');
+      // debugPrint('좋아요 상태 스트림 해제: $cacheKey');
     };
     
-    return subject.stream;
+    return controller.stream;
   }
   
   // 댓글 좋아요 상태 확인 (일회성)
@@ -381,7 +384,7 @@ class CommentRepository {
     required String commentId,
     required String userId,
   }) async {
-    debugPrint('좋아요 토글 시작: commentId=$commentId, userId=$userId');
+    // debugPrint('좋아요 토글 시작: commentId=$commentId, userId=$userId');
     
     try {
       final likeRef = _firestore
@@ -394,6 +397,10 @@ class CommentRepository {
       
       // 현재 상태 확인
       bool newLikeStatus = false;
+      int newLikesCount = 0;
+      
+      // 캐시 키
+      final cacheKey = '$commentId:$userId';
       
       // 트랜잭션으로 처리하여 동시성 문제 방지
       await _firestore.runTransaction((transaction) async {
@@ -412,11 +419,14 @@ class CommentRepository {
           transaction.delete(likeRef);
           
           if (currentLikesCount > 0) {
-            transaction.update(commentRef, {'likesCount': currentLikesCount - 1});
+            newLikesCount = currentLikesCount - 1;
+            transaction.update(commentRef, {'likesCount': newLikesCount});
+          } else {
+            newLikesCount = 0;
           }
           
           newLikeStatus = false;
-          debugPrint('좋아요 취소 처리됨: 현재 카운트=${currentLikesCount - 1}');
+          // debugPrint('좋아요 취소 처리됨: 현재 카운트=$newLikesCount');
         } else {
           // 좋아요 추가
           transaction.set(likeRef, {
@@ -424,20 +434,20 @@ class CommentRepository {
             'createdAt': FieldValue.serverTimestamp(),
           });
           
-          transaction.update(commentRef, {'likesCount': currentLikesCount + 1});
+          newLikesCount = currentLikesCount + 1;
+          transaction.update(commentRef, {'likesCount': newLikesCount});
           
           newLikeStatus = true;
-          debugPrint('좋아요 추가 처리됨: 현재 카운트=${currentLikesCount + 1}');
+          // debugPrint('좋아요 추가 처리됨: 현재 카운트=$newLikesCount');
         }
       });
       
       // 캐시된 스트림이 있다면 새 상태로 업데이트
-      final cacheKey = '$commentId:$userId';
       if (_likeStatusCache.containsKey(cacheKey) && !_likeStatusCache[cacheKey]!.isClosed) {
         _likeStatusCache[cacheKey]!.add(newLikeStatus);
       }
       
-      debugPrint('좋아요 토글 완료: 최종상태=$newLikeStatus');
+      // debugPrint('좋아요 토글 완료: 최종상태=$newLikeStatus, 좋아요 수=$newLikesCount');
       return newLikeStatus;
     } catch (e) {
       debugPrint('좋아요 토글 실패: $e');
@@ -447,10 +457,10 @@ class CommentRepository {
   
   // 리소스 정리 (앱 종료 시 호출)
   void dispose() {
-    // 열려있는 모든 BehaviorSubject 닫기
-    for (final subject in _likeStatusCache.values) {
-      if (!subject.isClosed) {
-        subject.close();
+    // 열려있는 모든 StreamController 닫기
+    for (final controller in _likeStatusCache.values) {
+      if (!controller.isClosed) {
+        controller.close();
       }
     }
     _likeStatusCache.clear();

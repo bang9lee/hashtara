@@ -23,10 +23,11 @@ final userPostsProvider = StreamProvider.family<List<PostModel>, String>((ref, u
   return repository.getUserPosts(userId);
 });
 
-// 좋아요 상태 프로바이더 (캐싱 적용)
-final postLikeStatusProvider = FutureProvider.family<bool, Map<String, String>>((ref, params) {
+// 좋아요 상태 프로바이더 (기존 캐싱 방식에서 스트림 방식으로 변경)
+// 실시간 좋아요 상태 업데이트를 위한 StreamProvider로 변경
+final postLikeStatusProvider = StreamProvider.family<bool, Map<String, String>>((ref, params) {
   final repository = ref.watch(feedRepositoryProvider);
-  return repository.getLikeStatusOnce(params['postId']!, params['userId']!);
+  return repository.getLikeStatus(params['postId']!, params['userId']!);
 });
 
 // 북마크 상태 프로바이더
@@ -55,16 +56,18 @@ class PostController extends StateNotifier<AsyncValue<void>> {
   
   PostController(this._repository, this._ref) : super(const AsyncValue.data(null));
   
-  // 피드 새로고침 헬퍼 메서드 - unused_result 경고 해결을 위한 메서드
+  // 피드 새로고침 헬퍼 메서드 - unused_result 경고 수정
   void _refreshFeed() {
-    final result = _ref.refresh(feedPostsProvider);
-    debugPrint('피드 새로고침 요청: ${result.hashCode}');
+    // unused_result 경고 수정 방법: 반환값 사용하지 않음을 명시적으로 표현
+    var _ = _ref.refresh(feedPostsProvider);
+    debugPrint('피드 새로고침 요청됨');
   }
   
-  // 사용자 게시물 새로고침 헬퍼 메서드
+  // 사용자 게시물 새로고침 헬퍼 메서드 - unused_result 경고 수정
   void _refreshUserPosts(String userId) {
-    final result = _ref.refresh(userPostsProvider(userId));
-    debugPrint('사용자 게시물 새로고침 요청: ${result.hashCode}');
+    // unused_result 경고 수정 방법: 반환값 사용하지 않음을 명시적으로 표현
+    var _ = _ref.refresh(userPostsProvider(userId));
+    debugPrint('사용자 게시물 새로고침 요청: $userId');
   }
   
   // 게시물 상세 새로고침 헬퍼 메서드
@@ -73,16 +76,18 @@ class PostController extends StateNotifier<AsyncValue<void>> {
     debugPrint('게시물 상세 새로고침 요청됨: $postId');
   }
   
-  // 좋아요 상태 새로고침 헬퍼 메서드
+  // 좋아요 상태 새로고침 헬퍼 메서드 - unused_result 경고 수정
   void _refreshLikeStatus(String postId, String userId) {
-    final result = _ref.refresh(postLikeStatusProvider({'postId': postId, 'userId': userId}));
-    debugPrint('좋아요 상태 새로고침 요청: ${result.hashCode}');
+    // unused_result 경고 수정 방법: 반환값 사용하지 않음을 명시적으로 표현
+    var _ = _ref.refresh(postLikeStatusProvider({'postId': postId, 'userId': userId}));
+    debugPrint('좋아요 상태 새로고침 요청됨');
   }
   
-  // 북마크 상태 새로고침 헬퍼 메서드
+  // 북마크 상태 새로고침 헬퍼 메서드 - unused_result 경고 수정
   void _refreshBookmarkStatus(String postId, String userId) {
-    final result = _ref.refresh(postBookmarkStatusProvider({'postId': postId, 'userId': userId}));
-    debugPrint('북마크 상태 새로고침 요청: ${result.hashCode}');
+    // unused_result 경고 수정 방법: 반환값 사용하지 않음을 명시적으로 표현
+    var _ = _ref.refresh(postBookmarkStatusProvider({'postId': postId, 'userId': userId}));
+    debugPrint('북마크 상태 새로고침 요청됨');
   }
   
   // 게시물 생성
@@ -130,12 +135,12 @@ class PostController extends StateNotifier<AsyncValue<void>> {
     
     try {
       await _repository.updatePost(
-        postId,
-        caption,
-        location,
-        imageUrls,
-        newImageFiles,
-        hashtags,
+        postId: postId,
+        caption: caption,
+        location: location,
+        imageUrls: imageUrls,
+        newImageFiles: newImageFiles, 
+        hashtags: hashtags,
       );
       
       // 피드와 해당 게시물 상세 정보 새로고침
@@ -184,11 +189,14 @@ class PostController extends StateNotifier<AsyncValue<void>> {
   Future<void> toggleLike(String postId, String userId) async {
     try {
       debugPrint('PostController: toggleLike 호출됨 - postId: $postId, userId: $userId');
+      
+      // 백엔드에 좋아요 요청 전송
       await _repository.toggleLike(postId, userId);
       
-      // 좋아요 상태 및 관련 데이터 새로고침
-      debugPrint('좋아요 토글 성공 - 상태 새로고침');
+      // 관련 상태 새로고침
       _refreshLikeStatus(postId, userId);
+      
+      // 게시물 상세 데이터는 StreamProvider로 자동 갱신되지만, 명시적 새로고침도 요청
       _refreshPostDetail(postId);
       _refreshFeed();
       
@@ -199,7 +207,16 @@ class PostController extends StateNotifier<AsyncValue<void>> {
       }
     } catch (e) {
       debugPrint('좋아요 토글 실패: $e');
-      // 오류 상태로 변경하지 않고 로그만 출력
+      // 오류 발생 시 UI에 알림
+      state = AsyncValue.error(e, StackTrace.current);
+      // 잠시 후 상태 초기화
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          state = const AsyncValue.data(null);
+        }
+      });
+      // 에러 재발생
+      rethrow;
     }
   }
   

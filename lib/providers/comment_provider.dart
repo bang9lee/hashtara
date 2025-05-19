@@ -10,15 +10,17 @@ final commentRepositoryProvider = Provider<CommentRepository>((ref) {
   return CommentRepository();
 });
 
-// 특정 게시물의 댓글 목록 프로바이더
+// 특정 게시물의 댓글 목록 프로바이더 - 캐싱 및 성능 최적화
 final postCommentsProvider = StreamProvider.family<List<CommentModel>, String>((ref, postId) {
   final repository = ref.watch(commentRepositoryProvider);
   debugPrint('댓글 프로바이더 호출 - postId: $postId');
   
-  return repository.getCommentsForPost(postId);
+  // 스트림 공유 및 캐싱
+  return repository.getCommentsForPost(postId)
+    .shareReplay(maxSize: 1); // 마지막 값만 캐싱
 });
 
-// 댓글 좋아요 상태 프로바이더 - 캐싱 메커니즘 추가
+// 댓글 좋아요 상태 프로바이더 - 메모리 최적화
 final commentLikeStatusProvider = StreamProvider.autoDispose.family<bool, Map<String, String>>((ref, params) {
   // 캐싱을 위해 캐시 만료를 방지
   ref.keepAlive();
@@ -31,22 +33,24 @@ final commentLikeStatusProvider = StreamProvider.autoDispose.family<bool, Map<St
   
   // 유효성 검사
   if (commentId.isEmpty || userId.isEmpty) {
-    debugPrint('경고: 댓글 좋아요 상태 프로바이더에 잘못된 파라미터 전달됨');
+    debugPrint('⚠️ 댓글 좋아요 상태 프로바이더에 잘못된 파라미터 전달됨');
     // 빈 값인 경우 기본값 false를 반환하는 스트림
     return Stream.value(false);
   }
   
-  // 초기 값과 실시간 업데이트를 결합하는 스트림 생성
-  // 공유 및 캐싱을 위해 shareReplay 추가
-  return repository.getLikeStatusStream(commentId, userId).shareReplay(maxSize: 1);
+  // 스트림 공유 및 캐싱
+  return repository.getLikeStatusStream(commentId, userId)
+    .shareReplay(maxSize: 1); // 마지막 값만 캐싱
 });
 
-// 특정 댓글의 대댓글 프로바이더
+// 특정 댓글의 대댓글 프로바이더 - 캐싱 최적화
 final commentRepliesProvider = StreamProvider.family<List<CommentModel>, String>((ref, commentId) {
   final repository = ref.watch(commentRepositoryProvider);
   debugPrint('대댓글 프로바이더 호출 - commentId: $commentId');
   
-  return repository.getRepliesForComment(commentId);
+  // 스트림 공유 및 캐싱
+  return repository.getRepliesForComment(commentId)
+    .shareReplay(maxSize: 1); // 마지막 값만 캐싱
 });
 
 // 댓글 컨트롤러 프로바이더
@@ -58,6 +62,9 @@ final commentControllerProvider = StateNotifierProvider<CommentController, Async
 class CommentController extends StateNotifier<AsyncValue<void>> {
   final CommentRepository _repository;
   final Ref _ref;
+  
+  // 부모 댓글 ID 캐시
+  String? _cachedParentId;
   
   CommentController(this._repository, this._ref) : super(const AsyncValue.data(null));
   
@@ -145,33 +152,38 @@ class CommentController extends StateNotifier<AsyncValue<void>> {
     }
   }
   
-  // 좋아요 토글 - 캐시 무효화 최적화
+  // 좋아요 토글 - 최적화
   Future<void> toggleLike({
     required String commentId,
     required String userId,
+    String? postId,
   }) async {
     try {
-      debugPrint('좋아요 토글 호출됨: $commentId, $userId');
+      // parentId 캐시 업데이트 - non-nullable 필드 문제 해결
+      if (postId != null) {
+        _cachedParentId = postId;
+      }
       
-      // 토글 실행 전 현재 상태 가져오기
-      final currentLikeStatus = await _repository.getLikeStatusOnce(commentId, userId);
-      
-      // 토글 실행
+      // 실제 좋아요 토글 실행
       await _repository.toggleLike(
         commentId: commentId,
         userId: userId,
       );
       
-      // 댓글 목록 새로고침 요청 - 좋아요 카운트 업데이트를 위해
-      // 이 부분이 없으면 좋아요 상태는 변경되지만 카운트가 화면에 반영되지 않음
-      _ref.invalidate(postCommentsProvider);
-      
-      // 기존 캐시된 상태를 읽어서 수동으로 반전시키지 않고
-      // 프로바이더 자체를 무효화하여 새 값을 가져오도록 함
+      // 좋아요 상태 프로바이더만 선택적 무효화 (성능 최적화)
       final params = {'commentId': commentId, 'userId': userId};
       _ref.invalidate(commentLikeStatusProvider(params));
       
-      debugPrint('좋아요 토글 완료: $commentId, 이전 상태: $currentLikeStatus');
+      // postId가 있는 경우에만 관련 스트림 업데이트
+      if (postId != null) {
+        // 댓글 목록만 업데이트 (무거운 작업 회피)
+        _ref.invalidate(postCommentsProvider(postId));
+        
+        // 캐시된 부모 댓글 ID가 있는 경우 대댓글 목록도 업데이트
+        if (_cachedParentId != null) {
+          _ref.invalidate(commentRepliesProvider(_cachedParentId!));
+        }
+      }
     } catch (e) {
       debugPrint('댓글 좋아요 토글 실패: $e');
       rethrow;
@@ -188,6 +200,8 @@ class CommentController extends StateNotifier<AsyncValue<void>> {
     // 대댓글인 경우 부모 댓글의 대댓글 목록도 새로고침
     if (parentId != null) {
       _ref.invalidate(commentRepliesProvider(parentId));
+      // 부모 댓글 ID 캐시 업데이트
+      _cachedParentId = parentId;
     }
     
     // 게시물 상세 정보 프로바이더 (댓글 수 표시용)

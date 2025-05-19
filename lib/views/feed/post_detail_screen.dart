@@ -1,7 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../constants/app_colors.dart';
-import '../../../providers/feed_provider.dart'; // 수정: feed_provider.dart 정확하게 임포트
+import '../../../providers/feed_provider.dart';
 import '../../../providers/comment_provider.dart';
 import '../../../providers/auth_provider.dart';
 import '../widgets/post_card_detailed.dart';
@@ -48,31 +48,32 @@ class _PostDetailScreenState extends ConsumerState<PostDetailScreen> {
       _isRefreshing = true;
     });
     
-     try {
-    debugPrint('PostDetailScreen: 데이터 새로고침 시작');
-    
-    // 기존 프로바이더 무효화
-    ref.invalidate(postDetailProvider(widget.postId));
-    ref.invalidate(postCommentsProvider(widget.postId));
-    
-    // 데이터 가져오기 강제 시작
-    await Future.delayed(const Duration(milliseconds: 100));
-    
-    if (mounted) {
-      // 강제로 데이터를 가져오기
-      final _ = ref.refresh(postCommentsProvider(widget.postId));
-    }
-  } catch (e) {
-    debugPrint('데이터 새로고침 오류: $e');
-  } finally {
-    // 중요: 로딩 상태를 항상 false로 되돌려야 함
-    if (mounted) {
-      setState(() {
-        _isRefreshing = false;
-      });
+    try {
+      debugPrint('PostDetailScreen: 데이터 새로고침 시작');
+      
+      // 기존 프로바이더 무효화
+      ref.invalidate(postDetailProvider(widget.postId));
+      ref.invalidate(postCommentsProvider(widget.postId));
+      
+      // 데이터 가져오기 강제 시작
+      await Future.delayed(const Duration(milliseconds: 100));
+      
+      if (mounted) {
+        // 강제로 데이터를 가져오기
+        // unused_result 경고 수정: 변수에 할당 (결과 사용)
+        var _ = ref.refresh(postCommentsProvider(widget.postId));
+      }
+    } catch (e) {
+      debugPrint('데이터 새로고침 오류: $e');
+    } finally {
+      // 중요: 로딩 상태를 항상 false로 되돌려야 함
+      if (mounted) {
+        setState(() {
+          _isRefreshing = false;
+        });
+      }
     }
   }
-}
 
   @override
   void dispose() {
@@ -171,7 +172,7 @@ class _PostDetailScreenState extends ConsumerState<PostDetailScreen> {
           padding: EdgeInsets.zero,
           onPressed: _isRefreshing ? null : _refreshData,
           child: _isRefreshing
-              ? const CupertinoActivityIndicator(radius: 10, color: AppColors.white)
+              ? const CupertinoActivityIndicator(color: AppColors.white)
               : const Icon(
                   CupertinoIcons.refresh,
                   color: AppColors.white,
@@ -256,7 +257,7 @@ class _PostDetailScreenState extends ConsumerState<PostDetailScreen> {
                         ),
                       ),
                       
-                      // 댓글 목록 (모든 댓글 표시)
+                      // 댓글 목록 (모든 댓글 표시) - 역순으로 변경하지 않음: 최신이 맨 아래에 오도록
                       commentsAsync.when(
                         data: (comments) {
                           // 자세한 로그 대신 간단한 요약 표시
@@ -279,8 +280,12 @@ class _PostDetailScreenState extends ConsumerState<PostDetailScreen> {
                             );
                           }
                           
-                          // 모든 댓글 표시 (스레드 방식)
-                          final parentComments = comments.where((c) => c.parentId == null).toList();
+                          // 모든 댓글 표시 (스레드 방식) - 정렬은 변경하지 않음
+                          // 부모 댓글만 먼저 필터링
+                          final parentComments = comments
+                              .where((c) => c.parentId == null)
+                              .toList();
+                          
                           return SliverList(
                             delegate: SliverChildBuilderDelegate(
                               (context, index) {
@@ -445,8 +450,10 @@ class _PostDetailScreenState extends ConsumerState<PostDetailScreen> {
     String postUserId,
     int replyCount,
   ) {
-    // 불필요한 리빌드 방지를 위해 read 사용
+    // 작성자 정보 가져오기 - 불필요한 리빌드 최소화를 위해 read 대신 watch 사용
     final authorAsync = ref.watch(getUserProfileProvider(comment.userId));
+    
+    // 현재 사용자 정보
     final currentUserAsync = ref.watch(currentUserProvider);
     
     return GestureDetector(
@@ -590,12 +597,11 @@ class _PostDetailScreenState extends ConsumerState<PostDetailScreen> {
                       ),
                       const SizedBox(width: 16),
                       
-                      // 좋아요 버튼 (개별 위젯으로 분리하여 리렌더링 최소화)
-                      currentUserAsync.maybeWhen(
-                        data: (currentUser) => currentUser != null
-                            ? _buildLikeButton(comment, currentUser.id)
-                            : const SizedBox.shrink(),
-                        orElse: () => const SizedBox.shrink(),
+                      // 좋아요 버튼 - 상태 값을 사용하도록 수정
+                      _CommentLikeButtonFixed(
+                        comment: comment,
+                        userId: currentUserAsync.valueOrNull?.id ?? '',
+                        postId: widget.postId,
                       ),
                       
                       const SizedBox(width: 16),
@@ -626,74 +632,21 @@ class _PostDetailScreenState extends ConsumerState<PostDetailScreen> {
             ),
             
             // 더보기 버튼
-            currentUserAsync.maybeWhen(
-              data: (currentUser) => currentUser?.id == comment.userId
-                  ? CupertinoButton(
-                      padding: EdgeInsets.zero,
-                      onPressed: () {
-                        _showCommentOptions(context, comment);
-                      },
-                      child: const Icon(
-                        CupertinoIcons.ellipsis_vertical,
-                        color: AppColors.textSecondary,
-                        size: 16,
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-              orElse: () => const SizedBox.shrink(),
-            ),
+            if (currentUserAsync.valueOrNull?.id == comment.userId)
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                onPressed: () {
+                  _showCommentOptions(context, comment);
+                },
+                child: const Icon(
+                  CupertinoIcons.ellipsis_vertical,
+                  color: AppColors.textSecondary,
+                  size: 16,
+                ),
+              ),
           ],
         ),
       ),
-    );
-  }
-  
-  // 좋아요 버튼 위젯 - 성능 최적화를 위해 별도 메서드로 분리
-  Widget _buildLikeButton(dynamic comment, String userId) {
-    return Consumer(
-      builder: (context, ref, child) {
-        final likeStatusAsync = ref.watch(commentLikeStatusProvider({
-          'commentId': comment.id, 
-          'userId': userId
-        }));
-        
-        return GestureDetector(
-          onTap: () {
-            // 좋아요 토글
-            ref.read(commentControllerProvider.notifier).toggleLike(
-              commentId: comment.id,
-              userId: userId,
-            );
-          },
-          child: likeStatusAsync.when(
-            data: (isLiked) => Row(
-              children: [
-                Icon(
-                  isLiked ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
-                  color: isLiked ? CupertinoColors.systemRed : AppColors.textSecondary,
-                  size: 14,
-                ),
-                if (comment.likesCount > 0) ...[
-                  const SizedBox(width: 4),
-                  Text(
-                    comment.likesCount.toString(),
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            loading: () => const CupertinoActivityIndicator(radius: 6),
-            error: (_, __) => const Icon(
-              CupertinoIcons.heart,
-              color: AppColors.textSecondary,
-              size: 14,
-            ),
-          ),
-        );
-      },
     );
   }
   
@@ -822,5 +775,135 @@ class _PostDetailScreenState extends ConsumerState<PostDetailScreen> {
     } else {
       return '방금 전';
     }
+  }
+}
+
+// 좋아요 버튼 위젯 - 무한 로딩 문제 개선을 위해 StatefulWidget으로 변경
+class _CommentLikeButtonFixed extends ConsumerStatefulWidget {
+  final dynamic comment;
+  final String userId;
+  final String postId;
+  
+  const _CommentLikeButtonFixed({
+    required this.comment,
+    required this.userId,
+    required this.postId,
+  });
+  
+  @override
+  ConsumerState<_CommentLikeButtonFixed> createState() => _CommentLikeButtonFixedState();
+}
+
+class _CommentLikeButtonFixedState extends ConsumerState<_CommentLikeButtonFixed> {
+  bool _isLiked = false;
+  bool _isLoading = false;
+  int _likesCount = 0;
+  
+  @override
+  void initState() {
+    super.initState();
+    _likesCount = widget.comment.likesCount;
+    
+    // 초기 좋아요 상태 가져오기
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchInitialLikeStatus();
+    });
+  }
+  
+  @override
+  void didUpdateWidget(_CommentLikeButtonFixed oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    
+    // 위젯이 업데이트될 때 좋아요 수 갱신
+    if (oldWidget.comment.likesCount != widget.comment.likesCount) {
+      setState(() {
+        _likesCount = widget.comment.likesCount;
+      });
+    }
+  }
+  
+  // 초기 좋아요 상태 가져오기
+  Future<void> _fetchInitialLikeStatus() async {
+    if (widget.userId.isEmpty) return;
+    
+    try {
+      // 좋아요 상태 가져오기 (일회성 호출)
+      final isLiked = await ref.read(commentRepositoryProvider).getLikeStatusOnce(
+        widget.comment.id,
+        widget.userId,
+      );
+      
+      if (mounted) {
+        setState(() {
+          _isLiked = isLiked;
+        });
+      }
+    } catch (e) {
+      debugPrint('초기 좋아요 상태 가져오기 실패: $e');
+    }
+  }
+  
+  // 좋아요 토글 처리
+  Future<void> _toggleLike() async {
+    if (widget.userId.isEmpty || _isLoading) return;
+    
+    setState(() {
+      _isLoading = true;
+      _isLiked = !_isLiked;
+      _likesCount += _isLiked ? 1 : -1;
+    });
+    
+    try {
+      // 토글 이벤트 발생 시 좋아요 토글
+      await ref.read(commentControllerProvider.notifier).toggleLike(
+        commentId: widget.comment.id,
+        userId: widget.userId,
+        postId: widget.postId,
+      );
+    } catch (e) {
+      // 오류 발생 시 상태 되돌리기
+      if (mounted) {
+        setState(() {
+          _isLiked = !_isLiked;
+          _likesCount += _isLiked ? 1 : -1;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _toggleLike,
+      child: Row(
+        children: [
+          // 아이콘 표시 (로딩 중이면 로딩 아이콘, 아니면 하트)
+          _isLoading
+              ? const CupertinoActivityIndicator(radius: 6)
+              : Icon(
+                  _isLiked ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
+                  color: _isLiked ? CupertinoColors.systemRed : AppColors.textSecondary,
+                  size: 14,
+                ),
+          // 좋아요 수 표시
+          if (_likesCount > 0) ...[
+            const SizedBox(width: 4),
+            Text(
+              _likesCount.toString(),
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
