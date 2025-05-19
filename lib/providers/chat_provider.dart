@@ -175,4 +175,17 @@ class ChatController extends StateNotifier<AsyncValue<void>> {
       state = AsyncValue.error(e, stack);
     }
   }
+  
+  // 1:1 채팅방 ID 생성 또는 가져오기 (Profile Screen용 간소화 메서드)
+  Future<String?> createOrGetChatRoom(String currentUserId, String otherUserId) async {
+    try {
+      return await getOrCreateDirectChat(
+        currentUserId: currentUserId,
+        otherUserId: otherUserId,
+      );
+    } catch (e) {
+      debugPrint('채팅방 생성/조회 실패: $e');
+      rethrow;
+    }
+  }
 }

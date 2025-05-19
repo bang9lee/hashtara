@@ -6,9 +6,8 @@ import '../../../models/post_model.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/feed_provider.dart';
 import '../widgets/user_avatar.dart';
-import '../../views/feed/comment_screen.dart';
-import '../../views/feed/edit_post_screen.dart';
 import '../../views/feed/post_detail_screen.dart';
+import '../../views/feed/edit_post_screen.dart';
 import '../../views/feed/photo_view_screen.dart';
 import '../profile/profile_screen.dart';
 
@@ -31,87 +30,21 @@ class PostCard extends ConsumerStatefulWidget {
 }
 
 class _PostCardState extends ConsumerState<PostCard> {
-  // 로컬 상태로 좋아요 상태 관리
-  bool _isLiked = false;
-  late int _likesCount; // 로컬 좋아요 카운트 상태 추가
-  bool _isLikeInProgress = false; // 좋아요 처리 중 상태 추가
   bool _isDeleting = false; // 삭제 처리 중 상태 추가
-  
-  @override
-  void initState() {
-    super.initState();
-    
-    // 초기 좋아요 상태와 카운트 설정
-    _likesCount = widget.post.likesCount;
-    
-    // 초기 좋아요 상태 가져오기 (한 번만)
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _fetchInitialLikeStatus();
-    });
-  }
-  
-  @override
-  void didUpdateWidget(PostCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    
-    // 위젯이 업데이트될 때 likesCount 상태 갱신
-    if (oldWidget.post.likesCount != widget.post.likesCount) {
-      setState(() {
-        _likesCount = widget.post.likesCount;
-      });
-    }
-  }
-  
-  // 초기 좋아요 상태 가져오기
-  void _fetchInitialLikeStatus() {
-    final currentUser = ref.read(currentUserProvider).valueOrNull;
-    if (currentUser != null) {
-      ref.read(feedRepositoryProvider).getLikeStatusOnce(
-        widget.post.id,
-        currentUser.id
-      ).then((isLiked) {
-        if (mounted) {
-          setState(() {
-            _isLiked = isLiked;
-          });
-        }
-      });
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
     // 게시물 작성자 정보 가져오기
     final userFuture = ref.watch(getUserProfileProvider(widget.post.userId));
     final currentUserAsync = ref.watch(currentUserProvider);
-    
-    // 전역 좋아요 상태도 감시 (스트림 기반)
-    if (currentUserAsync.valueOrNull != null) {
-      ref.listen(
-        postLikeStatusProvider({
-          'postId': widget.post.id, 
-          'userId': currentUserAsync.valueOrNull!.id
-        }), 
-        (previous, next) {
-          // 스트림에서 상태 변경이 감지되면 로컬 상태 업데이트
-          next.whenData((isLiked) {
-            if (mounted && _isLiked != isLiked) {
-              setState(() {
-                _isLiked = isLiked;
-              });
-            }
-          });
-        }
-      );
-    }
 
     return GestureDetector(
       // 게시물 카드 전체를 클릭했을 때 상세 화면으로 이동 (단, 상세 화면에서는 동작하지 않음)
       onTap: widget.isDetailView
           ? null
           : () {
-              Navigator.push(
-                context,
+              // 수정된 부분: 루트 네비게이터 사용 제거, 현재 컨텍스트의 네비게이터 사용
+              Navigator.of(context).push(
                 CupertinoPageRoute(
                   builder: (context) => PostDetailScreen(
                     postId: widget.post.id,
@@ -136,16 +69,17 @@ class _PostCardState extends ConsumerState<PostCard> {
                   children: [
                     UserAvatar(
                       imageUrl: user?.profileImageUrl,
-                      onTap: widget.onProfileTap ?? () {
-                        // 프로필 화면으로 이동
-                        Navigator.of(context).push(
-                          CupertinoPageRoute(
-                            builder: (context) => ProfileScreen(
-                              userId: widget.post.userId,
-                            ),
-                          ),
-                        );
-                      },
+                      onTap: widget.onProfileTap ??
+                          () {
+                            // 프로필 화면으로 이동
+                            Navigator.of(context).push(
+                              CupertinoPageRoute(
+                                builder: (context) => ProfileScreen(
+                                  userId: widget.post.userId,
+                                ),
+                              ),
+                            );
+                          },
                     ),
                     const SizedBox(width: 12.0),
                     Expanded(
@@ -188,7 +122,8 @@ class _PostCardState extends ConsumerState<PostCard> {
                       padding: EdgeInsets.zero,
                       onPressed: () {
                         // 게시물 옵션 메뉴
-                        _showPostOptions(context, ref, widget.post, currentUserAsync.valueOrNull);
+                        _showPostOptions(context, ref, widget.post,
+                            currentUserAsync.valueOrNull);
                       },
                       child: const Icon(
                         CupertinoIcons.ellipsis,
@@ -209,7 +144,8 @@ class _PostCardState extends ConsumerState<PostCard> {
             ),
 
             // 게시물 이미지
-            if (widget.post.imageUrls != null && widget.post.imageUrls!.isNotEmpty)
+            if (widget.post.imageUrls != null &&
+                widget.post.imageUrls!.isNotEmpty)
               SizedBox(
                 width: double.infinity,
                 height: 300,
@@ -219,8 +155,7 @@ class _PostCardState extends ConsumerState<PostCard> {
                     return GestureDetector(
                       onTap: () {
                         // 이미지 클릭 시 이미지 확대 화면으로 이동
-                        Navigator.push(
-                          context,
+                        Navigator.of(context).push(
                           CupertinoPageRoute(
                             builder: (context) => PhotoViewScreen(
                               imageUrl: widget.post.imageUrls![index],
@@ -257,7 +192,8 @@ class _PostCardState extends ConsumerState<PostCard> {
             // 게시물 내용
             if (widget.post.caption != null && widget.post.caption!.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
                 child: Text(
                   widget.post.caption!,
                   style: const TextStyle(
@@ -265,14 +201,18 @@ class _PostCardState extends ConsumerState<PostCard> {
                     fontSize: 15,
                   ),
                   maxLines: widget.showFullCaption ? null : 3,
-                  overflow: widget.showFullCaption ? TextOverflow.visible : TextOverflow.ellipsis,
+                  overflow: widget.showFullCaption
+                      ? TextOverflow.visible
+                      : TextOverflow.ellipsis,
                 ),
               ),
 
             // 위치 정보
-            if (widget.post.location != null && widget.post.location!.isNotEmpty)
+            if (widget.post.location != null &&
+                widget.post.location!.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
                 child: Row(
                   children: [
                     const Icon(
@@ -293,16 +233,18 @@ class _PostCardState extends ConsumerState<PostCard> {
               ),
 
             // 해시태그
-            if (widget.post.hashtags != null && widget.post.hashtags!.isNotEmpty)
+            if (widget.post.hashtags != null &&
+                widget.post.hashtags!.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
                 child: Wrap(
                   spacing: 8.0,
                   children: widget.post.hashtags!.map((tag) {
                     return Text(
                       tag,
                       style: const TextStyle(
-                        color: AppColors.secondaryBlue,
+                        color: Color.fromARGB(0, 99, 72, 255),
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
                       ),
@@ -310,96 +252,21 @@ class _PostCardState extends ConsumerState<PostCard> {
                   }).toList(),
                 ),
               ),
-            
-            // 액션 버튼들 (좋아요, 댓글, 공유) - 내용 아래로 이동됨
+
+            // 액션 버튼들 (댓글, 공유)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
               child: Row(
                 children: [
-                  // 좋아요 버튼
-                  GestureDetector(
-                    onTap: _isLikeInProgress ? null : () {
-                      final currentUser = currentUserAsync.valueOrNull;
-                      if (currentUser != null) {
-                        // 중복 클릭 방지
-                        if (_isLikeInProgress) return;
-                        
-                        setState(() {
-                          _isLikeInProgress = true;
-                          _isLiked = !_isLiked;
-                          // 좋아요 카운트 즉시 업데이트
-                          _likesCount += _isLiked ? 1 : -1;
-                        });
-                        
-                        // 백엔드에 좋아요 요청 전송
-                        ref.read(postControllerProvider.notifier)
-                            .toggleLike(widget.post.id, currentUser.id)
-                            .then((_) {
-                              // 요청 완료 후 처리 중 상태 해제
-                              if (mounted) {
-                                setState(() {
-                                  _isLikeInProgress = false;
-                                });
-                              }
-                            })
-                            .catchError((error) {
-                              // 오류 발생 시 UI 상태 되돌리기
-                              if (mounted) {
-                                setState(() {
-                                  _isLiked = !_isLiked;
-                                  _likesCount += _isLiked ? 1 : -1;
-                                  _isLikeInProgress = false;
-                                });
-                                
-                                // 오류 메시지 표시 (CupertinoAlertDialog 사용)
-                                if (mounted) {
-                                  _showErrorDialog('좋아요 오류', '좋아요 처리 중 오류가 발생했습니다');
-                                }
-                              }
-                              return null;
-                            });
-                      } else {
-                        _showLoginRequiredDialog();
-                      }
-                    },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      child: Padding(
-                        padding: const EdgeInsets.all(8.0), // 탭 영역 확장
-                        child: _isLikeInProgress
-                            ? const CupertinoActivityIndicator(radius: 10)
-                            : Icon(
-                                _isLiked
-                                    ? CupertinoIcons.heart_fill
-                                    : CupertinoIcons.heart,
-                                color: _isLiked
-                                    ? CupertinoColors.systemRed
-                                    : AppColors.textEmphasis,
-                                size: 24,
-                              ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  if (_likesCount > 0)
-                    Text(
-                      _likesCount.toString(),
-                      style: const TextStyle(
-                        color: AppColors.textEmphasis,
-                        fontSize: 14,
-                      ),
-                    ),
-                  const SizedBox(width: 16),
-
                   // 댓글 버튼
                   GestureDetector(
                     onTap: () {
-                      Navigator.push(
-                        context,
+                      // 수정된 부분: 루트 네비게이터 사용 제거
+                      Navigator.of(context).push(
                         CupertinoPageRoute(
-                          builder: (context) => CommentScreen(
+                          builder: (context) => PostDetailScreen(
                             postId: widget.post.id,
-                            postUserId: widget.post.userId,
                           ),
                         ),
                       );
@@ -442,19 +309,19 @@ class _PostCardState extends ConsumerState<PostCard> {
                 ],
               ),
             ),
-            
+
             // 상세 화면이 아닌 경우 댓글 버튼 표시
             if (!widget.isDetailView)
               Padding(
-                padding: const EdgeInsets.only(left: 12.0, right: 12.0, bottom: 12.0),
+                padding: const EdgeInsets.only(
+                    left: 12.0, right: 12.0, bottom: 12.0),
                 child: GestureDetector(
                   onTap: () {
-                    Navigator.push(
-                      context,
+                    // 수정된 부분: 루트 네비게이터 사용 제거
+                    Navigator.of(context).push(
                       CupertinoPageRoute(
-                        builder: (context) => CommentScreen(
+                        builder: (context) => PostDetailScreen(
                           postId: widget.post.id,
-                          postUserId: widget.post.userId,
                         ),
                       ),
                     );
@@ -496,7 +363,7 @@ class _PostCardState extends ConsumerState<PostCard> {
       return '방금 전';
     }
   }
-  
+
   // 오류 메시지 표시 (CupertinoAlertDialog 사용)
   void _showErrorDialog(String title, String message) {
     showCupertinoDialog(
@@ -513,32 +380,7 @@ class _PostCardState extends ConsumerState<PostCard> {
       ),
     );
   }
-  
-  // 로그인 필요 다이얼로그
-  void _showLoginRequiredDialog() {
-    showCupertinoDialog(
-      context: context,
-      builder: (dialogContext) => CupertinoAlertDialog(
-        title: const Text('로그인 필요'),
-        content: const Text('이 기능을 사용하려면 로그인이 필요합니다.'),
-        actions: [
-          CupertinoDialogAction(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('취소'),
-          ),
-          CupertinoDialogAction(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              // 로그인 화면으로 이동 (필요한 경우 구현)
-            },
-            isDefaultAction: true,
-            child: const Text('로그인'),
-          ),
-        ],
-      ),
-    );
-  }
-  
+
   // 공유 옵션 표시
   void _showShareOptions() {
     showCupertinoModalPopup(
@@ -569,7 +411,8 @@ class _PostCardState extends ConsumerState<PostCard> {
             child: const Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(CupertinoIcons.doc_text, color: CupertinoColors.systemBlue),
+                Icon(CupertinoIcons.doc_text,
+                    color: CupertinoColors.systemBlue),
                 SizedBox(width: 8),
                 Text('텍스트로 공유'),
               ],
@@ -583,7 +426,7 @@ class _PostCardState extends ConsumerState<PostCard> {
       ),
     );
   }
-  
+
   // 이미지로 공유 (사진이 있는 경우)
   void _shareImage() {
     // 게시물에 이미지가 있는지 확인
@@ -594,22 +437,22 @@ class _PostCardState extends ConsumerState<PostCard> {
       _shareContent();
       return;
     }
-    
+
     final String imageUrl = widget.post.imageUrls![0];
     final String caption = widget.post.caption ?? '';
     const String shareSubject = 'Hashtara 게시물';
-    
+
     try {
       // 메시지: 공유 시도 중임을 사용자에게 알림
       _showShareSuccessToast('공유 중...');
-      
+
       // 실제 앱에서는 이미지를 로컬에 다운로드한 후 공유
       // FileDownloader.downloadFile(imageUrl)
       //   .then((file) => Share.shareFiles([file.path], text: caption));
-      
+
       // 현재는 텍스트만 공유 (테스트용)
       Share.share(caption, subject: shareSubject);
-      
+
       debugPrint('이미지로 공유 시도: $imageUrl');
     } catch (e) {
       debugPrint('이미지 공유 오류: $e');
@@ -617,18 +460,19 @@ class _PostCardState extends ConsumerState<PostCard> {
       return;
     }
   }
-  
+
   // 텍스트 내용으로 공유
   void _shareContent() {
     // 공유할 내용 구성
     const String username = '게시자'; // 실제로는 사용자 이름
     final String caption = widget.post.caption ?? '';
     final String hashtags = widget.post.hashtags?.join(' ') ?? '';
-    
+
     // 공유 문구 생성
-    final shareContent = '[$username]\n$caption\n\n$hashtags\n\n해시태라(Hashtara)에서 공유됨';
+    final shareContent =
+        '[$username]\n$caption\n\n$hashtags\n\n해시태라(Hashtara)에서 공유됨';
     const shareSubject = 'Hashtara 게시물';
-    
+
     try {
       // 공유 다이얼로그 열기
       Share.share(shareContent, subject: shareSubject);
@@ -639,12 +483,12 @@ class _PostCardState extends ConsumerState<PostCard> {
       return;
     }
   }
-  
+
   // 공유 오류 토스트 메시지
   void _showShareErrorToast(String message) {
     final overlay = Navigator.of(context).overlay;
     if (overlay == null) return;
-    
+
     final toast = OverlayEntry(
       builder: (context) => Positioned(
         bottom: 100,
@@ -668,21 +512,21 @@ class _PostCardState extends ConsumerState<PostCard> {
         ),
       ),
     );
-    
+
     overlay.insert(toast);
-    
+
     // 2초 후 토스트 메시지 제거
     Future.delayed(const Duration(seconds: 2), () {
       toast.remove();
     });
   }
-  
+
   // 공유 성공 토스트 메시지
   void _showShareSuccessToast(String message) {
     // 토스트 메시지 표시
     final overlay = Navigator.of(context).overlay;
     if (overlay == null) return;
-    
+
     final toast = OverlayEntry(
       builder: (context) => Positioned(
         bottom: 100,
@@ -706,24 +550,20 @@ class _PostCardState extends ConsumerState<PostCard> {
         ),
       ),
     );
-    
+
     overlay.insert(toast);
-    
+
     // 2초 후 토스트 메시지 제거
     Future.delayed(const Duration(seconds: 2), () {
       toast.remove();
     });
   }
-  
+
   // 게시물 옵션 메뉴 표시
-  void _showPostOptions(
-    BuildContext context, 
-    WidgetRef ref, 
-    PostModel post, 
-    dynamic currentUser
-  ) {
+  void _showPostOptions(BuildContext context, WidgetRef ref, PostModel post,
+      dynamic currentUser) {
     final isAuthor = currentUser?.id == post.userId;
-    
+
     showCupertinoModalPopup(
       context: context,
       builder: (dialogContext) => CupertinoActionSheet(
@@ -735,8 +575,7 @@ class _PostCardState extends ConsumerState<PostCard> {
               onPressed: () {
                 Navigator.pop(dialogContext);
                 // 게시물 수정 화면으로 이동
-                Navigator.push(
-                  context,
+                Navigator.of(context).push(
                   CupertinoPageRoute(
                     builder: (context) => EditPostScreen(post: post),
                   ),
@@ -748,7 +587,7 @@ class _PostCardState extends ConsumerState<PostCard> {
             if (_isDeleting)
               CupertinoActionSheetAction(
                 // 비어있는 함수를 전달 (null 대신)
-                onPressed: () {}, 
+                onPressed: () {},
                 isDestructiveAction: true,
                 child: const Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -796,7 +635,7 @@ class _PostCardState extends ConsumerState<PostCard> {
       ),
     );
   }
-  
+
   // 게시물 삭제 확인 다이얼로그
   void _showDeleteConfirmation(WidgetRef ref, String postId) {
     showCupertinoDialog(
@@ -814,7 +653,7 @@ class _PostCardState extends ConsumerState<PostCard> {
             onPressed: () {
               // 다이얼로그 닫기
               Navigator.pop(dialogContext);
-              
+
               // 삭제 처리 - 비동기 로직을 별도 메서드로 분리
               _performDeletePost(ref, postId);
             },
@@ -824,23 +663,23 @@ class _PostCardState extends ConsumerState<PostCard> {
       ),
     );
   }
-  
+
   // 삭제 처리 로직을 별도 메서드로 분리
   Future<void> _performDeletePost(WidgetRef ref, String postId) async {
     // 이미 삭제 중이면 무시
     if (_isDeleting) return;
-    
+
     // 삭제 중 상태로 변경
     if (mounted) {
       setState(() {
         _isDeleting = true;
       });
     }
-    
+
     try {
-      // 게시물 삭제 요청 
+      // 게시물 삭제 요청
       await ref.read(postControllerProvider.notifier).deletePost(postId);
-      
+
       // 성공 메시지 표시 (mounted 체크와 함께)
       if (mounted) {
         _showDeleteSuccessToast();
@@ -859,12 +698,12 @@ class _PostCardState extends ConsumerState<PostCard> {
       }
     }
   }
-  
+
   // 삭제 성공 토스트 표시
   void _showDeleteSuccessToast() {
     final overlay = Navigator.of(context).overlay;
     if (overlay == null) return;
-    
+
     final entry = OverlayEntry(
       builder: (_) => Positioned(
         bottom: 100,
@@ -888,15 +727,15 @@ class _PostCardState extends ConsumerState<PostCard> {
         ),
       ),
     );
-    
+
     overlay.insert(entry);
-    
+
     // 2초 후 토스트 메시지 제거
     Future.delayed(const Duration(seconds: 2), () {
       entry.remove();
     });
   }
-  
+
   // 신고 옵션 표시
   void _showReportOptions() {
     showCupertinoModalPopup(
@@ -945,12 +784,12 @@ class _PostCardState extends ConsumerState<PostCard> {
       ),
     );
   }
-  
+
   // 게시물 신고 처리
   void _reportPost(String reason) {
     // 실제 신고 처리 로직
     debugPrint('게시물 ${widget.post.id} 신고됨: $reason');
-    
+
     // 신고 확인 다이얼로그
     showCupertinoDialog(
       context: context,

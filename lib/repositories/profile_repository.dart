@@ -4,6 +4,7 @@ import 'package:logger/logger.dart';
 import 'package:flutter/material.dart';
 import 'dart:io';
 import '../models/profile_model.dart';
+import '../models/user_model.dart';
 
 class ProfileRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -18,7 +19,8 @@ class ProfileRepository {
       
       if (doc.exists) {
         debugPrint('프로필 조회 성공: $userId');
-        return ProfileModel.fromFirestore(doc);
+        // 수정: DocumentSnapshot -> Map<String, dynamic> 변환 및 docId 추가
+        return ProfileModel.fromFirestore(doc.data() ?? {}, doc.id);
       }
       
       debugPrint('프로필이 존재하지 않음: $userId');
@@ -27,6 +29,25 @@ class ProfileRepository {
     } catch (e) {
       debugPrint('프로필 조회 실패: $e');
       rethrow;
+    }
+  }
+  
+  // 사용자 정보 가져오기 (ID로)
+  Future<UserModel?> getUserById(String userId) async {
+    try {
+      debugPrint('사용자 정보 조회: $userId');
+      final doc = await _firestore.collection('users').doc(userId).get();
+      
+      if (doc.exists) {
+        debugPrint('사용자 정보 조회 성공: $userId');
+        return UserModel.fromFirestore(doc);
+      }
+      
+      debugPrint('사용자가 존재하지 않음: $userId');
+      return null;
+    } catch (e) {
+      debugPrint('사용자 정보 조회 실패: $e');
+      return null;
     }
   }
   
@@ -55,7 +76,7 @@ class ProfileRepository {
         await _firestore
             .collection('profiles')
             .doc(userId)
-            .set(newProfile.toMap());
+            .set(newProfile.toFirestore()); // toMap -> toFirestore 변경
         debugPrint('새 프로필 문서 생성 완료: $userId');
       }
     } catch (e) {
@@ -72,7 +93,7 @@ class ProfileRepository {
       await _firestore
           .collection('profiles')
           .doc(profile.userId)
-          .update(profile.toMap());
+          .update(profile.toFirestore()); // toMap -> toFirestore 변경
       debugPrint('프로필 업데이트 성공');
     } catch (e) {
       // 문서가 없는 경우 새로 만들기 시도
@@ -81,7 +102,7 @@ class ProfileRepository {
         await _firestore
             .collection('profiles')
             .doc(profile.userId)
-            .set(profile.toMap());
+            .set(profile.toFirestore()); // toMap -> toFirestore 변경
         debugPrint('프로필 문서 생성 성공');
       } catch (innerError) {
         debugPrint('프로필 업데이트/생성 실패: $innerError');
@@ -143,6 +164,245 @@ class ProfileRepository {
     } catch (e) {
       debugPrint('게시물 수 조회 실패: $e');
       return 0;
+    }
+  }
+  
+  // 팔로우 확인
+  Future<bool> checkIfFollowing(String followerId, String followingId) async {
+    try {
+      debugPrint('팔로우 상태 확인: $followerId -> $followingId');
+      
+      final doc = await _firestore
+          .collection('users')
+          .doc(followerId)
+          .collection('following')
+          .doc(followingId)
+          .get();
+      
+      final isFollowing = doc.exists;
+      debugPrint('팔로우 상태: ${isFollowing ? "팔로우 중" : "팔로우하지 않음"}');
+      
+      return isFollowing;
+    } catch (e) {
+      debugPrint('팔로우 상태 확인 오류: $e');
+      return false;
+    }
+  }
+  
+  // 사용자 팔로우
+  Future<void> followUser(String followerId, String followingId) async {
+    try {
+      debugPrint('사용자 팔로우 시도: $followerId -> $followingId');
+      
+      // 이미 팔로우 중인지 확인
+      final isAlreadyFollowing = await checkIfFollowing(followerId, followingId);
+      if (isAlreadyFollowing) {
+        debugPrint('이미 팔로우 중인 사용자입니다');
+        return;
+      }
+      
+      // 트랜잭션으로 데이터 정합성 유지
+      await _firestore.runTransaction((transaction) async {
+        // 1. 사용자 프로필 문서 참조
+        final followerProfileRef = _firestore.collection('profiles').doc(followerId);
+        final followingProfileRef = _firestore.collection('profiles').doc(followingId);
+        
+        // 2. 프로필 문서 가져오기
+        final followerProfileDoc = await transaction.get(followerProfileRef);
+        final followingProfileDoc = await transaction.get(followingProfileRef);
+        
+        // 3. 현재 팔로잉/팔로워 수 계산
+        int currentFollowingCount = 0;
+        int currentFollowersCount = 0;
+        
+        if (followerProfileDoc.exists) {
+          currentFollowingCount = followerProfileDoc.data()?['followingCount'] ?? 0;
+        }
+        
+        if (followingProfileDoc.exists) {
+          currentFollowersCount = followingProfileDoc.data()?['followersCount'] ?? 0;
+        }
+        
+        // 4. 팔로잉 관계 생성
+        final followingRef = _firestore
+            .collection('users')
+            .doc(followerId)
+            .collection('following')
+            .doc(followingId);
+            
+        transaction.set(followingRef, {
+          'userId': followingId,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        
+        // 5. 팔로워 관계 생성
+        final followerRef = _firestore
+            .collection('users')
+            .doc(followingId)
+            .collection('followers')
+            .doc(followerId);
+            
+        transaction.set(followerRef, {
+          'userId': followerId,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        
+        // 6. 팔로잉/팔로워 수 업데이트
+        transaction.update(followerProfileRef, {'followingCount': currentFollowingCount + 1});
+        transaction.update(followingProfileRef, {'followersCount': currentFollowersCount + 1});
+      });
+      
+      debugPrint('사용자 팔로우 성공: $followerId -> $followingId');
+    } catch (e) {
+      debugPrint('사용자 팔로우 실패: $e');
+      rethrow;
+    }
+  }
+  
+  // 사용자 언팔로우
+  Future<void> unfollowUser(String followerId, String followingId) async {
+    try {
+      debugPrint('사용자 언팔로우 시도: $followerId -> $followingId');
+      
+      // 팔로우 중인지 확인
+      final isFollowing = await checkIfFollowing(followerId, followingId);
+      if (!isFollowing) {
+        debugPrint('팔로우 중이 아닌 사용자입니다');
+        return;
+      }
+      
+      // 트랜잭션으로 데이터 정합성 유지
+      await _firestore.runTransaction((transaction) async {
+        // 1. 사용자 프로필 문서 참조
+        final followerProfileRef = _firestore.collection('profiles').doc(followerId);
+        final followingProfileRef = _firestore.collection('profiles').doc(followingId);
+        
+        // 2. 프로필 문서 가져오기
+        final followerProfileDoc = await transaction.get(followerProfileRef);
+        final followingProfileDoc = await transaction.get(followingProfileRef);
+        
+        // 3. 현재 팔로잉/팔로워 수 계산
+        int currentFollowingCount = 0;
+        int currentFollowersCount = 0;
+        
+        if (followerProfileDoc.exists) {
+          currentFollowingCount = followerProfileDoc.data()?['followingCount'] ?? 0;
+        }
+        
+        if (followingProfileDoc.exists) {
+          currentFollowersCount = followingProfileDoc.data()?['followersCount'] ?? 0;
+        }
+        
+        // 4. 팔로잉 관계 삭제
+        final followingRef = _firestore
+            .collection('users')
+            .doc(followerId)
+            .collection('following')
+            .doc(followingId);
+            
+        transaction.delete(followingRef);
+        
+        // 5. 팔로워 관계 삭제
+        final followerRef = _firestore
+            .collection('users')
+            .doc(followingId)
+            .collection('followers')
+            .doc(followerId);
+            
+        transaction.delete(followerRef);
+        
+        // 6. 팔로잉/팔로워 수 업데이트 (음수 방지)
+        if (currentFollowingCount > 0) {
+          transaction.update(followerProfileRef, {'followingCount': currentFollowingCount - 1});
+        }
+        
+        if (currentFollowersCount > 0) {
+          transaction.update(followingProfileRef, {'followersCount': currentFollowersCount - 1});
+        }
+      });
+      
+      debugPrint('사용자 언팔로우 성공: $followerId -> $followingId');
+    } catch (e) {
+      debugPrint('사용자 언팔로우 실패: $e');
+      rethrow;
+    }
+  }
+  
+  // 팔로워 목록 가져오기
+  Future<List<UserModel>> getFollowers(String userId) async {
+    try {
+      debugPrint('팔로워 목록 조회: $userId');
+      
+      final snapshot = await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('followers')
+          .orderBy('createdAt', descending: true)
+          .get();
+      
+      final followerIds = snapshot.docs.map((doc) => doc.id).toList();
+      
+      if (followerIds.isEmpty) {
+        return [];
+      }
+      
+      // 팔로워 사용자 정보 조회
+      final followers = <UserModel>[];
+      for (final id in followerIds) {
+        try {
+          final userDoc = await _firestore.collection('users').doc(id).get();
+          if (userDoc.exists) {
+            followers.add(UserModel.fromFirestore(userDoc));
+          }
+        } catch (e) {
+          debugPrint('팔로워 정보 조회 실패: $id, $e');
+        }
+      }
+      
+      debugPrint('팔로워 ${followers.length}명 조회 완료');
+      return followers;
+    } catch (e) {
+      debugPrint('팔로워 목록 조회 실패: $e');
+      return [];
+    }
+  }
+  
+  // 팔로잉 목록 가져오기
+  Future<List<UserModel>> getFollowing(String userId) async {
+    try {
+      debugPrint('팔로잉 목록 조회: $userId');
+      
+      final snapshot = await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('following')
+          .orderBy('createdAt', descending: true)
+          .get();
+      
+      final followingIds = snapshot.docs.map((doc) => doc.id).toList();
+      
+      if (followingIds.isEmpty) {
+        return [];
+      }
+      
+      // 팔로잉 사용자 정보 조회
+      final following = <UserModel>[];
+      for (final id in followingIds) {
+        try {
+          final userDoc = await _firestore.collection('users').doc(id).get();
+          if (userDoc.exists) {
+            following.add(UserModel.fromFirestore(userDoc));
+          }
+        } catch (e) {
+          debugPrint('팔로잉 정보 조회 실패: $id, $e');
+        }
+      }
+      
+      debugPrint('팔로잉 ${following.length}명 조회 완료');
+      return following;
+    } catch (e) {
+      debugPrint('팔로잉 목록 조회 실패: $e');
+      return [];
     }
   }
 }

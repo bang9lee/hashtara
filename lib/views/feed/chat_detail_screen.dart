@@ -6,6 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../../constants/app_colors.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/chat_provider.dart';
+import '../../../providers/profile_provider.dart';
 
 class ChatDetailScreen extends ConsumerStatefulWidget {
   final String chatId;
@@ -531,7 +532,8 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
     // 발신자 정보 (내 메시지가 아닌 경우)
     Widget senderInfo = const SizedBox.shrink();
     if (!isMe) {
-      final senderAsync = ref.watch(getUserProfileProvider(message.senderId));
+      // getProfileProvider 사용 (수정된 부분)
+      final senderAsync = ref.watch(getProfileProvider(message.senderId));
       senderInfo = senderAsync.when(
         data: (sender) {
           return Padding(

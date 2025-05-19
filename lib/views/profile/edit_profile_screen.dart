@@ -26,6 +26,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   final _bioController = TextEditingController();
   final _locationController = TextEditingController();
   
+  // 해시태그 관련 추가
+  final List<String> _favoriteHashtags = [];
+  final _hashtagController = TextEditingController();
+  
   File? _profileImage;
   bool _isLoading = false;
   bool _isLoggingOut = false;
@@ -57,6 +61,12 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         setState(() {
           _bioController.text = profile.bio ?? '';
           _locationController.text = profile.location ?? '';
+          
+          // 좋아하는 해시태그 로드
+          _favoriteHashtags.clear();
+          if (profile.favoriteHashtags != null) {
+            _favoriteHashtags.addAll(profile.favoriteHashtags!);
+          }
         });
       }
     });
@@ -68,18 +78,116 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     _usernameController.dispose();
     _bioController.dispose();
     _locationController.dispose();
+    _hashtagController.dispose(); // 해시태그 컨트롤러 해제
     super.dispose();
   }
   
   Future<void> _pickImage() async {
     final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
     
-    if (pickedFile != null) {
+    // showCupertinoModalPopup을 사용하여 선택 옵션 표시
+    await showCupertinoModalPopup<void>(
+      context: context,
+      builder: (BuildContext context) => CupertinoActionSheet(
+        title: const Text('프로필 사진 선택'),
+        message: const Text('사진을 선택하거나 찍으세요'),
+        actions: <CupertinoActionSheetAction>[
+          CupertinoActionSheetAction(
+            child: const Text('카메라로 촬영'),
+            onPressed: () async {
+              Navigator.pop(context);
+              final pickedFile = await picker.pickImage(
+                source: ImageSource.camera,
+                maxWidth: 800,
+                maxHeight: 800,
+                imageQuality: 90,
+              );
+              
+              if (pickedFile != null && mounted) {
+                setState(() {
+                  _profileImage = File(pickedFile.path);
+                });
+              }
+            },
+          ),
+          CupertinoActionSheetAction(
+            child: const Text('갤러리에서 선택'),
+            onPressed: () async {
+              Navigator.pop(context);
+              final pickedFile = await picker.pickImage(
+                source: ImageSource.gallery,
+                maxWidth: 800,
+                maxHeight: 800,
+                imageQuality: 90,
+              );
+              
+              if (pickedFile != null && mounted) {
+                setState(() {
+                  _profileImage = File(pickedFile.path);
+                });
+              }
+            },
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          child: const Text('취소'),
+          onPressed: () {
+            Navigator.pop(context);
+          },
+        ),
+      ),
+    );
+  }
+  
+  // 해시태그 추가 함수
+  void _addHashtag() {
+    final hashtag = _hashtagController.text.trim();
+    if (hashtag.isEmpty) return;
+    
+    // # 기호가 앞에 있으면 제거
+    final cleanHashtag = hashtag.startsWith('#') ? hashtag.substring(1) : hashtag;
+    
+    // 이미 존재하는 해시태그인지 확인
+    if (!_favoriteHashtags.contains(cleanHashtag)) {
+      // 최대 3개까지만 추가 가능
+      if (_favoriteHashtags.length < 3) {
+        setState(() {
+          _favoriteHashtags.add(cleanHashtag);
+          _hashtagController.clear();
+        });
+      } else {
+        // 최대 개수 초과 메시지
+        setState(() {
+          _errorMessage = '해시태그는 최대 3개까지 추가할 수 있습니다.';
+        });
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) {
+            setState(() {
+              _errorMessage = null;
+            });
+          }
+        });
+      }
+    } else {
+      // 중복 해시태그 메시지
       setState(() {
-        _profileImage = File(pickedFile.path);
+        _errorMessage = '이미 추가된 해시태그입니다.';
+      });
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          setState(() {
+            _errorMessage = null;
+          });
+        }
       });
     }
+  }
+  
+  // 해시태그 삭제 함수
+  void _removeHashtag(String hashtag) {
+    setState(() {
+      _favoriteHashtags.remove(hashtag);
+    });
   }
   
   Future<void> _saveProfile() async {
@@ -112,11 +220,12 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         profileImageUrl: profileImageUrl,
       );
       
-      // 추가 프로필 정보 업데이트
+      // 추가 프로필 정보 업데이트 (좋아하는 해시태그 포함)
       await ref.read(profileControllerProvider.notifier).updateProfile(
         userId: widget.userId,
         bio: _bioController.text.trim(),
         location: _locationController.text.trim(),
+        favoriteHashtags: _favoriteHashtags,
       );
       
       // Provider 캐시 갱신 - Lint 경고 수정
@@ -371,16 +480,93 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
               ),
               const SizedBox(height: 24),
               
+              // 좋아하는 해시태그 섹션 추가
+              const Text(
+                '좋아하는 해시태그 (최대 3개)',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.normal,
+                  color: AppColors.textEmphasis,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Expanded(
+                    child: CustomTextField(
+                      controller: _hashtagController,
+                      placeholder: '해시태그 입력 (예: flutter)',
+                      enabled: !_isLoading && _favoriteHashtags.length < 3,
+                      // CustomTextField에서 textInputAction과 onSubmitted가 지원되지 않으므로 제거
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  CupertinoButton(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    color: AppColors.primaryPurple,
+                    borderRadius: BorderRadius.circular(8),
+                    onPressed: !_isLoading && _favoriteHashtags.length < 3 ? _addHashtag : null,
+                    child: const Text(
+                      '추가',
+                      style: TextStyle(
+                        color: CupertinoColors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              
+              // 해시태그 목록
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _favoriteHashtags.map((tag) {
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryPurple.withAlpha(26), // withOpacity 대신 withAlpha 사용
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '#$tag',
+                          style: const TextStyle(
+                            color: AppColors.primaryPurple,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        GestureDetector(
+                          onTap: () => _removeHashtag(tag),
+                          child: const Icon(
+                            CupertinoIcons.xmark_circle_fill,
+                            color: AppColors.primaryPurple,
+                            size: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+              
               // 로딩 인디케이터
               if (_isLoading)
                 const Center(
-                  child: CupertinoActivityIndicator(),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16.0),
+                    child: CupertinoActivityIndicator(),
+                  ),
                 ),
               
               // 에러 메시지
               if (_errorMessage != null)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 16.0),
+                  padding: const EdgeInsets.symmetric(vertical: 16.0),
                   child: Text(
                     _errorMessage!,
                     style: const TextStyle(

@@ -17,6 +17,12 @@ final bottomNavIndexProvider = StateProvider<int>((ref) => 0);
 // UI 새로고침을 위한 프로바이더 (값이 변경될 때마다 UI가 업데이트됨)
 final uiRefreshProvider = StateProvider<int>((ref) => 0);
 
+// 홈 탭 내비게이터 키
+final homeNavigatorKey = GlobalKey<NavigatorState>();
+
+// 홈 탭 재설정 프로바이더 - 홈 탭 내용을 강제로 리셋하기 위한 용도
+final homeResetProvider = StateProvider<int>((ref) => 0);
+
 class MainTabScreen extends ConsumerStatefulWidget {
   const MainTabScreen({Key? key}) : super(key: key);
 
@@ -25,6 +31,15 @@ class MainTabScreen extends ConsumerStatefulWidget {
 }
 
 class _MainTabScreenState extends ConsumerState<MainTabScreen> {
+  // 각 탭별 네비게이터 키 저장
+  final List<GlobalKey<NavigatorState>> _navigatorKeys = [
+    homeNavigatorKey,
+    GlobalKey<NavigatorState>(),
+    GlobalKey<NavigatorState>(),
+    GlobalKey<NavigatorState>(),
+    GlobalKey<NavigatorState>(),
+  ];
+  
   @override
   void initState() {
     super.initState();
@@ -43,8 +58,8 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
         // 사용자 정보 갱신
         final refresh1 = ref.refresh(currentUserProvider);
         
-        // 사용자 프로필 갱신
-        final refresh2 = ref.refresh(getUserProfileProvider(user.uid));
+        // 사용자 프로필 갱신 - getProfileProvider 사용으로 변경
+        final refresh2 = ref.refresh(getProfileProvider(user.uid));
         
         // 사용자 게시물 리스트 갱신
         final refresh3 = ref.refresh(userPostsProvider(user.uid));
@@ -62,6 +77,29 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
         debugPrint('사용자 ${user.uid} 데이터 갱신 완료');
       }
     });
+  }
+
+  // 홈 탭 선택 시 홈 화면으로 이동하는 메서드
+  void _navigateToHome() {
+    // 현재 탭이 홈 탭이 아니면 홈 탭으로 변경
+    final currentIndex = ref.read(bottomNavIndexProvider);
+    if (currentIndex != 0) {
+      ref.read(bottomNavIndexProvider.notifier).state = 0;
+      return;
+    }
+    
+    // 이미 홈 탭에 있는 경우, 홈 네비게이터의 루트로 이동
+    final homeNavigator = homeNavigatorKey.currentState;
+    if (homeNavigator != null) {
+      homeNavigator.popUntil((route) => route.isFirst);
+      
+      // 홈 화면 초기화를 위해 피드 데이터 갱신
+      final feedRefresh = ref.refresh(feedPostsProvider);
+      debugPrint('홈 피드 데이터 갱신: ${feedRefresh.hashCode}');
+      
+      // UI 새로고침 트리거
+      ref.read(uiRefreshProvider.notifier).state += 1;
+    }
   }
 
   @override
@@ -100,14 +138,18 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
             icon: Icon(CupertinoIcons.search),
             activeIcon: Icon(CupertinoIcons.search_circle_fill),
           ),
-          // 게시물 작성 탭 - 아이콘 수정
-          const BottomNavigationBarItem(
+          // 게시물 작성 탭 - 이미지로 변경
+          BottomNavigationBarItem(
             icon: Padding(
-              padding: EdgeInsets.only(top: 5.0),
+              padding: const EdgeInsets.only(top: 5.0),
               child: SizedBox(
-                width: 40,
+                width: 40, 
                 height: 40,
-                child: Icon(CupertinoIcons.plus_circle_fill, size: 40),
+                child: Image.asset(
+                  'assets/images/center.png',
+                  width: 40,
+                  height: 40,
+                ),
               ),
             ),
           ),
@@ -169,6 +211,12 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
         ],
         currentIndex: currentIndex,
         onTap: (index) {
+          // 홈 탭(0)을 탭하면 홈으로 이동하는 로직
+          if (index == 0) {
+            _navigateToHome();
+            return;
+          }
+          
           // 게시 버튼은 모달로 CreatePostScreen 열기
           if (index == 2) {
             showCupertinoModalPopup(
@@ -184,24 +232,14 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
             return; // 인덱스 변경 없음
           }
           
-          // 채팅 탭으로 이동할 때 데이터 갱신
-          if (index == 3) {
-            _refreshAllData();
-            
-            // UI 강제 갱신 트리거
-            ref.read(uiRefreshProvider.notifier).state += 1;
-          }
-          
-          // 프로필 탭으로 이동할 때 데이터 갱신
-          if (index == 4) {
-            _refreshAllData();
-            
-            // UI 강제 갱신 트리거
-            ref.read(uiRefreshProvider.notifier).state += 1;
-          }
-          
           // 다른 탭은 인덱스 변경
           ref.read(bottomNavIndexProvider.notifier).state = index;
+          
+          // 해당 탭으로 이동할 때 데이터 갱신
+          _refreshAllData();
+          
+          // UI 강제 갱신 트리거
+          ref.read(uiRefreshProvider.notifier).state += 1;
         },
       ),
       tabBuilder: (context, index) {
@@ -209,24 +247,29 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
         switch (index) {
           case 0:
             return CupertinoTabView(
+              navigatorKey: _navigatorKeys[0],
               builder: (_) => const HomeScreen(),
             );
           case 1:
             return CupertinoTabView(
+              navigatorKey: _navigatorKeys[1],
               builder: (_) => const HashtagExploreScreen(),
             );
           case 2:
             // 실제로는 바텀 탭 onTap에서 모달로 열림
             return CupertinoTabView(
+              navigatorKey: _navigatorKeys[2],
               builder: (_) => const HomeScreen(),
             );
           case 3:
             // 채팅 화면
             return CupertinoTabView(
-              builder: (_) => const ChatsListScreen(), // 올바른 클래스 사용
+              navigatorKey: _navigatorKeys[3],
+              builder: (_) => const ChatsListScreen(),
             );
           case 4:
             return CupertinoTabView(
+              navigatorKey: _navigatorKeys[4],
               builder: (_) => currentUser.when(
                 data: (user) => user != null
                     ? ProfileScreen(userId: user.id)

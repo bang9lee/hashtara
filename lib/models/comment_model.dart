@@ -1,68 +1,65 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/cupertino.dart';
 
 class CommentModel {
   final String id;
-  final String postId;
   final String userId;
+  final String postId;
   final String text;
   final DateTime createdAt;
-  final int likesCount;
-  final String? parentId; // 대댓글인 경우 부모 댓글 ID
+  final String? replyToCommentId; // 답글인 경우 부모 댓글 ID
   
   CommentModel({
     required this.id,
-    required this.postId,
     required this.userId,
+    required this.postId,
     required this.text,
     required this.createdAt,
-    this.likesCount = 0,
-    this.parentId,
+    this.replyToCommentId,
   });
   
   factory CommentModel.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    
-    // 서버 타임스탬프 처리를 위한 로직 추가
-    DateTime createdAtDate;
     try {
+      final data = doc.data() as Map<String, dynamic>;
+      
+      // createdAt 필드 처리
+      DateTime createdDateTime;
       if (data['createdAt'] is Timestamp) {
-        createdAtDate = (data['createdAt'] as Timestamp).toDate();
+        createdDateTime = (data['createdAt'] as Timestamp).toDate();
       } else {
-        // 타임스탬프가 없거나 다른 형식인 경우 현재 시간 사용
-        createdAtDate = DateTime.now();
+        // createdAt이 null이거나 Timestamp가 아닌 경우 현재 시간 사용
+        debugPrint('⚠️ createdAt이 유효하지 않음, 현재 시간 사용: ${data['createdAt']}');
+        createdDateTime = DateTime.now();
       }
+      
+      return CommentModel(
+        id: doc.id,
+        userId: data['userId'] ?? '',
+        postId: data['postId'] ?? '',
+        text: data['text'] ?? '',
+        createdAt: createdDateTime,
+        replyToCommentId: data['replyToCommentId'],
+      );
     } catch (e) {
-      debugPrint('날짜 변환 오류: $e, 문서 ID: ${doc.id}');
-      createdAtDate = DateTime.now();
+      debugPrint('⚠️ CommentModel.fromFirestore 예외 발생: $e');
+      // 예외 발생 시 기본값으로 객체 생성
+      return CommentModel(
+        id: doc.id,
+        userId: '',
+        postId: '',
+        text: '오류: 댓글을 불러올 수 없습니다',
+        createdAt: DateTime.now(),
+      );
     }
-    
-    return CommentModel(
-      id: data['id'] ?? doc.id,
-      postId: data['postId'] ?? '',
-      userId: data['userId'] ?? '',
-      text: data['text'] ?? '',
-      createdAt: createdAtDate,
-      likesCount: data['likesCount'] ?? 0,
-      parentId: data['parentId'],
-    );
   }
   
   Map<String, dynamic> toMap() {
     return {
-      'id': id,
-      'postId': postId,
       'userId': userId,
+      'postId': postId,
       'text': text,
       'createdAt': Timestamp.fromDate(createdAt),
-      'likesCount': likesCount,
-      'parentId': parentId,
+      'replyToCommentId': replyToCommentId,
     };
-  }
-  
-  // 디버깅을 위한 toString 오버라이드
-  @override
-  String toString() {
-    return 'CommentModel(id: $id, postId: $postId, userId: $userId, text: $text, createdAt: $createdAt, likesCount: $likesCount, parentId: $parentId)';
   }
 }

@@ -109,8 +109,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
             CupertinoButton(
               padding: EdgeInsets.zero,
               onPressed: () {
-                Navigator.push(
-                  context,
+                Navigator.of(context).push(
                   CupertinoPageRoute(
                     builder: (context) => const HashtagExploreScreen(),
                   ),
@@ -158,8 +157,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
                     color: AppColors.cardBackground,
                     borderRadius: BorderRadius.circular(12.0),
                     onPressed: () {
-                      Navigator.push(
-                        context,
+                      Navigator.of(context).push(
                         CupertinoPageRoute(
                           builder: (context) => const CreatePostScreen(),
                         ),
@@ -210,8 +208,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
                         CupertinoButton(
                           padding: EdgeInsets.zero,
                           onPressed: () {
-                            Navigator.push(
-                              context,
+                            Navigator.of(context).push(
                               CupertinoPageRoute(
                                 builder: (context) => const HashtagExploreScreen(),
                               ),
@@ -253,8 +250,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
                       CupertinoButton(
                         padding: EdgeInsets.zero,
                         onPressed: () {
-                          Navigator.push(
-                            context,
+                          Navigator.of(context).push(
                             CupertinoPageRoute(
                               builder: (context) => const HashtagExploreScreen(),
                             ),
@@ -415,8 +411,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
                 return _buildHashtagPill(
                   tag: channel.name,
                   onTap: () {
-                    Navigator.push(
-                      context,
+                    Navigator.of(context).push(
                       CupertinoPageRoute(
                         builder: (context) => HashtagChannelDetailScreen(
                           channelId: channel.id,
@@ -560,8 +555,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
   Widget _buildChannelCard(HashtagChannelModel channel) {
     return GestureDetector(
       onTap: () {
-        Navigator.push(
-          context,
+        Navigator.of(context).push(
           CupertinoPageRoute(
             builder: (context) => HashtagChannelDetailScreen(
               channelId: channel.id,

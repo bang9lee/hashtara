@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../constants/app_colors.dart';
 import '../../../models/post_model.dart';
 import '../../../providers/auth_provider.dart';
-import '../../../providers/feed_provider.dart';
 import '../widgets/user_avatar.dart';
 import '../../views/profile/profile_screen.dart';
 import '../feed/photo_view_screen.dart';
@@ -21,58 +20,10 @@ class PostCardDetailed extends ConsumerStatefulWidget {
 }
 
 class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
-  // 로컬 상태로 좋아요 상태 관리
-  bool _isLiked = false;
-  late int _likesCount; // 로컬 좋아요 카운트 상태 추가
-  bool _isLikeInProgress = false; // 좋아요 처리 중 상태 추가
-
-  @override
-  void initState() {
-    super.initState();
-    
-    // 초기 좋아요 상태와 카운트 설정
-    _likesCount = widget.post.likesCount;
-    
-    // 초기 좋아요 상태 가져오기 (한 번만)
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _fetchInitialLikeStatus();
-    });
-  }
-  
-  @override
-  void didUpdateWidget(PostCardDetailed oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    
-    // 위젯이 업데이트될 때 likesCount 상태 갱신
-    if (oldWidget.post.likesCount != widget.post.likesCount) {
-      setState(() {
-        _likesCount = widget.post.likesCount;
-      });
-    }
-  }
-  
-  // 초기 좋아요 상태 가져오기
-  void _fetchInitialLikeStatus() {
-    final currentUser = ref.read(currentUserProvider).valueOrNull;
-    if (currentUser != null) {
-      ref.read(feedRepositoryProvider).getLikeStatusOnce(
-        widget.post.id,
-        currentUser.id
-      ).then((isLiked) {
-        if (mounted) {
-          setState(() {
-            _isLiked = isLiked;
-          });
-        }
-      });
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     // 게시물 작성자 정보 가져오기
     final userFuture = ref.watch(getUserProfileProvider(widget.post.userId));
-    final currentUserAsync = ref.watch(currentUserProvider);
 
     return Container(
       decoration: BoxDecoration(
@@ -153,7 +104,8 @@ class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
           // 게시물 내용 먼저 표시 (요청대로 내용/사진 순서 변경)
           if (widget.post.caption != null && widget.post.caption!.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
               child: Text(
                 widget.post.caption!,
                 style: const TextStyle(
@@ -164,7 +116,8 @@ class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
             ),
 
           // 내용 다음에 이미지 표시
-          if (widget.post.imageUrls != null && widget.post.imageUrls!.isNotEmpty)
+          if (widget.post.imageUrls != null &&
+              widget.post.imageUrls!.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12.0),
               child: SizedBox(
@@ -215,7 +168,8 @@ class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
           // 위치 정보
           if (widget.post.location != null && widget.post.location!.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
               child: Row(
                 children: [
                   const Icon(
@@ -238,7 +192,8 @@ class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
           // 해시태그
           if (widget.post.hashtags != null && widget.post.hashtags!.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
               child: Wrap(
                 spacing: 8.0,
                 children: widget.post.hashtags!.map((tag) {
@@ -253,98 +208,13 @@ class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
                 }).toList(),
               ),
             ),
-            
-          // 액션 버튼들 (좋아요, 공유) - 내용 아래에 표시
+
+          // 액션 버튼들 (공유)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 12.0),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12.0, vertical: 12.0),
             child: Row(
               children: [
-                // 좋아요 버튼 - 로컬 상태 기반
-                GestureDetector(
-                  onTap: _isLikeInProgress ? null : () {
-                    final currentUser = currentUserAsync.valueOrNull;
-                    if (currentUser != null) {
-                      // 중복 클릭 방지
-                      if (_isLikeInProgress) return;
-                      
-                      setState(() {
-                        _isLikeInProgress = true;
-                        _isLiked = !_isLiked;
-                        // 좋아요 카운트 즉시 업데이트
-                        _likesCount += _isLiked ? 1 : -1;
-                      });
-                      
-                      // 백엔드에 좋아요 요청 전송
-                      ref.read(postControllerProvider.notifier)
-                          .toggleLike(widget.post.id, currentUser.id)
-                          .then((_) {
-                            // 요청 완료 후 처리 중 상태 해제
-                            if (mounted) {
-                              setState(() {
-                                _isLikeInProgress = false;
-                              });
-                            }
-                          })
-                          .catchError((error) {
-                            // 오류 발생 시 UI 상태 되돌리기
-                            if (mounted) {
-                              setState(() {
-                                _isLiked = !_isLiked;
-                                _likesCount += _isLiked ? 1 : -1;
-                                _isLikeInProgress = false;
-                              });
-                              
-                              // 오류 메시지 표시
-                              if (context.mounted) {
-                                showCupertinoDialog(
-                                  context: context,
-                                  builder: (context) => CupertinoAlertDialog(
-                                    title: const Text('오류'),
-                                    content: const Text('좋아요 처리 중 오류가 발생했습니다'),
-                                    actions: [
-                                      CupertinoDialogAction(
-                                        onPressed: () => Navigator.pop(context),
-                                        child: const Text('확인'),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              }
-                            }
-                            return null;
-                          });
-                    } else {
-                      _showLoginRequiredDialog(context);
-                    }
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    child: Padding(
-                      padding: const EdgeInsets.all(8.0), // 탭 영역 확장
-                      child: _isLikeInProgress
-                          ? const CupertinoActivityIndicator(radius: 10)
-                          : Icon(
-                              _isLiked
-                                  ? CupertinoIcons.heart_fill
-                                  : CupertinoIcons.heart,
-                              color: _isLiked
-                                  ? CupertinoColors.systemRed
-                                  : AppColors.textEmphasis,
-                              size: 24,
-                            ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  _likesCount.toString(),
-                  style: const TextStyle(
-                    color: AppColors.textEmphasis,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(width: 16),
-
                 // 공유 버튼
                 GestureDetector(
                   onTap: () {
@@ -387,32 +257,7 @@ class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
       return '방금 전';
     }
   }
-  
-  // 로그인 필요 다이얼로그
-  void _showLoginRequiredDialog(BuildContext context) {
-    showCupertinoDialog(
-      context: context,
-      builder: (context) => CupertinoAlertDialog(
-        title: const Text('로그인 필요'),
-        content: const Text('이 기능을 사용하려면 로그인이 필요합니다.'),
-        actions: [
-          CupertinoDialogAction(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('취소'),
-          ),
-          CupertinoDialogAction(
-            onPressed: () {
-              Navigator.pop(context);
-              // 로그인 화면으로 이동 (필요한 경우 구현)
-            },
-            isDefaultAction: true,
-            child: const Text('로그인'),
-          ),
-        ],
-      ),
-    );
-  }
-  
+
   // 공유 옵션 표시
   void _showShareOptions(BuildContext context) {
     showCupertinoModalPopup(
@@ -443,7 +288,8 @@ class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
             child: const Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(CupertinoIcons.doc_text, color: CupertinoColors.systemBlue),
+                Icon(CupertinoIcons.doc_text,
+                    color: CupertinoColors.systemBlue),
                 SizedBox(width: 8),
                 Text('텍스트로 공유'),
               ],
@@ -457,25 +303,25 @@ class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
       ),
     );
   }
-  
+
   // 이미지로 공유 (사진이 있는 경우)
   void _shareImage(BuildContext context) {
     // 구현은 PostCard와 동일
     _showShareSuccessToast(context, '이미지 공유 준비 중...');
   }
-  
+
   // 텍스트 내용으로 공유
   void _shareContent(BuildContext context) {
     // 구현은 PostCard와 동일
     _showShareSuccessToast(context, '텍스트 공유 준비 중...');
   }
-  
+
   // 공유 성공 토스트 메시지
   void _showShareSuccessToast(BuildContext context, String message) {
     // 토스트 메시지 표시
     final overlay = Navigator.of(context).overlay;
     if (overlay == null) return;
-    
+
     final toast = OverlayEntry(
       builder: (context) => Positioned(
         bottom: 100,
@@ -499,9 +345,9 @@ class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
         ),
       ),
     );
-    
+
     overlay.insert(toast);
-    
+
     // 2초 후 토스트 메시지 제거
     Future.delayed(const Duration(seconds: 2), () {
       toast.remove();

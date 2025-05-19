@@ -8,7 +8,6 @@ class PostModel {
   final List<String>? imageUrls;
   final String? location;
   final DateTime createdAt;
-  final int likesCount;
   final int commentsCount;
   final List<String>? hashtags;
   
@@ -19,7 +18,6 @@ class PostModel {
     this.imageUrls,
     this.location,
     required this.createdAt,
-    this.likesCount = 0,
     this.commentsCount = 0,
     this.hashtags,
   });
@@ -69,7 +67,6 @@ class PostModel {
         imageUrls: imageUrlsList,
         location: data['location'],
         createdAt: createdDateTime,
-        likesCount: data['likesCount'] ?? 0,
         commentsCount: data['commentsCount'] ?? 0,
         hashtags: hashtagsList,
       );
@@ -91,7 +88,6 @@ class PostModel {
       'imageUrls': imageUrls,
       'location': location,
       'createdAt': Timestamp.fromDate(createdAt),
-      'likesCount': likesCount,
       'commentsCount': commentsCount,
       'hashtags': hashtags,
     };

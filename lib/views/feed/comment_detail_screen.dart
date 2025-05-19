@@ -12,7 +12,6 @@ class CommentDetailScreen extends ConsumerStatefulWidget {
   final String commentId;
   final CommentModel comment;
   final String postUserId;
-  final bool isEditing;
 
   const CommentDetailScreen({
     Key? key,
@@ -20,33 +19,21 @@ class CommentDetailScreen extends ConsumerStatefulWidget {
     required this.commentId,
     required this.comment,
     required this.postUserId,
-    this.isEditing = false,
   }) : super(key: key);
 
   @override
-  ConsumerState<CommentDetailScreen> createState() => _CommentDetailScreenState();
+  ConsumerState<CommentDetailScreen> createState() =>
+      _CommentDetailScreenState();
 }
 
 class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
-  final TextEditingController _commentController = TextEditingController();
-  final FocusNode _commentFocusNode = FocusNode();
+  final TextEditingController _replyController = TextEditingController();
+  final FocusNode _replyFocusNode = FocusNode();
   bool _isSubmitting = false;
-  bool _isEditing = false;
 
   @override
   void initState() {
     super.initState();
-    
-    // 편집 모드인 경우 텍스트 필드에 기존 댓글 텍스트 설정
-    _isEditing = widget.isEditing;
-    if (_isEditing) {
-      _commentController.text = widget.comment.text;
-      
-      // 포커스 설정
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _commentFocusNode.requestFocus();
-      });
-    }
     
     // 데이터 새로고침
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -62,15 +49,15 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
 
   @override
   void dispose() {
-    _commentController.dispose();
-    _commentFocusNode.dispose();
+    _replyController.dispose();
+    _replyFocusNode.dispose();
     super.dispose();
   }
 
-  // 댓글/대댓글 제출
-  Future<void> _submitComment() async {
-    final commentText = _commentController.text.trim();
-    if (commentText.isEmpty || _isSubmitting) {
+  // 답글 제출
+  Future<void> _submitReply() async {
+    final replyText = _replyController.text.trim();
+    if (replyText.isEmpty || _isSubmitting) {
       return;
     }
 
@@ -84,58 +71,30 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
     });
 
     try {
-      if (_isEditing) {
-        // 댓글 수정 모드
-        await ref.read(commentControllerProvider.notifier).updateComment(
-          commentId: widget.commentId,
-          postId: widget.postId,
-          text: commentText,
-          parentId: widget.comment.parentId,
-        );
-        
-        setState(() {
-          _isEditing = false;
-        });
-      } else {
-        // 대댓글 작성 모드
-        await ref.read(commentControllerProvider.notifier).addComment(
-          postId: widget.postId,
-          userId: currentUser.id,
-          text: commentText,
-          parentId: widget.commentId,
-        );
-      }
+      // 답글로 작성
+      await ref.read(commentControllerProvider.notifier).addComment(
+            postId: widget.postId,
+            userId: currentUser.id,
+            text: replyText,
+            replyToCommentId: widget.commentId, // 부모 댓글 ID 지정 (중요!)
+          );
 
       // 성공 시 텍스트 필드 초기화
-      _commentController.clear();
-      
+      _replyController.clear();
+
       // 데이터 새로고침
       _refreshData();
+
+      debugPrint('답글 제출 완료');
       
-      // 편집 모드였던 경우 성공 후 뒤로 가기
-      if (_isEditing) {
-        if (mounted) {
-          Navigator.pop(context);
-        }
-      }
-      
-      debugPrint('댓글 제출 완료');
-    } catch (e) {
-      debugPrint('댓글 작업 실패: $e');
+      // 토스트 메시지 표시
       if (mounted) {
-        showCupertinoDialog(
-          context: context,
-          builder: (context) => CupertinoAlertDialog(
-            title: Text(_isEditing ? '댓글 수정 실패' : '댓글 등록 실패'),
-            content: Text('댓글을 처리하는 중 오류가 발생했습니다: $e'),
-            actions: [
-              CupertinoDialogAction(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('확인'),
-              ),
-            ],
-          ),
-        );
+        _showToast('답글이 등록되었습니다');
+      }
+    } catch (e) {
+      debugPrint('답글 작성 실패: $e');
+      if (mounted) {
+        _showErrorDialog('답글 등록 실패', '답글을 처리하는 중 오류가 발생했습니다: $e');
       }
     } finally {
       if (mounted) {
@@ -149,7 +108,7 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
   // 오류 다이얼로그
   void _showErrorDialog(String title, String message) {
     if (!mounted) return;
-    
+
     showCupertinoDialog(
       context: context,
       builder: (dialogContext) => CupertinoAlertDialog(
@@ -164,28 +123,66 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
       ),
     );
   }
+  
+  // 토스트 메시지 표시
+  void _showToast(String message) {
+    final overlay = Navigator.of(context).overlay;
+    if (overlay == null) return;
+
+    final toast = OverlayEntry(
+      builder: (context) => Positioned(
+        bottom: 100,
+        left: 0,
+        right: 0,
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            decoration: BoxDecoration(
+              color: CupertinoColors.black.withAlpha(179),
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: CupertinoColors.white,
+                fontSize: 16,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    overlay.insert(toast);
+
+    // 2초 후 토스트 메시지 제거
+    Future.delayed(const Duration(seconds: 2), () {
+      toast.remove();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     // 댓글 작성자 정보
-    final authorAsync = ref.watch(getUserProfileProvider(widget.comment.userId));
-    
-    // 댓글의 대댓글 목록
-    final repliesAsync = ref.watch(commentRepliesProvider(widget.commentId));
-    
+    final authorAsync =
+        ref.watch(getUserProfileProvider(widget.comment.userId));
+
     // 현재 로그인한 사용자
     final currentUserAsync = ref.watch(currentUserProvider);
+    
+    // 답글 목록
+    final repliesAsync = ref.watch(commentRepliesProvider(widget.commentId));
 
     return CupertinoPageScaffold(
       backgroundColor: AppColors.darkBackground,
       navigationBar: CupertinoNavigationBar(
-        backgroundColor: AppColors.primaryPurple,
+        backgroundColor: const Color.fromARGB(0, 124, 95, 255),
         border: const Border(
           bottom: BorderSide(color: AppColors.separator),
         ),
-        middle: Text(
-          _isEditing ? '댓글 수정' : '댓글 상세',
-          style: const TextStyle(
+        middle: const Text(
+          '댓글',
+          style: TextStyle(
             color: AppColors.white,
             fontWeight: FontWeight.bold,
           ),
@@ -205,7 +202,8 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
             // 메인 댓글
             Container(
               padding: const EdgeInsets.all(16.0),
-              margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              margin:
+                  const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               decoration: BoxDecoration(
                 color: AppColors.cardBackground,
                 borderRadius: BorderRadius.circular(12.0),
@@ -238,9 +236,9 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
                     ),
                     error: (_, __) => const SizedBox(width: 40, height: 40),
                   ),
-                  
+
                   const SizedBox(width: 12),
-                  
+
                   // 댓글 내용
                   Expanded(
                     child: Column(
@@ -273,7 +271,7 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
                               ),
                             ),
                             const SizedBox(width: 8),
-                            
+
                             // 게시물 작성자 표시
                             if (widget.comment.userId == widget.postUserId)
                               Container(
@@ -282,7 +280,8 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
                                   vertical: 2,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: const Color.fromRGBO(124, 95, 255, 0.3),
+                                  color:
+                                      const Color.fromRGBO(124, 95, 255, 0.3),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: const Text(
@@ -296,9 +295,9 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
                               ),
                           ],
                         ),
-                        
+
                         const SizedBox(height: 4),
-                        
+
                         // 댓글 텍스트
                         Text(
                           widget.comment.text,
@@ -307,71 +306,76 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
                             fontSize: 15,
                           ),
                         ),
-                        
+
                         const SizedBox(height: 8),
-                        
-                        // 댓글 메타 정보 (작성 시간, 좋아요)
-                        Row(
-                          children: [
-                            Text(
-                              _formatTimeAgo(widget.comment.createdAt),
-                              style: const TextStyle(
-                                color: AppColors.textSecondary,
-                                fontSize: 12,
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            
-                            // 좋아요 버튼
-                            currentUserAsync.when(
-                              data: (currentUser) => currentUser != null
-                                  ? _buildLikeButton(widget.comment, currentUser.id)
-                                  : const SizedBox.shrink(),
-                              loading: () => const SizedBox.shrink(),
-                              error: (_, __) => const SizedBox.shrink(),
-                            ),
-                          ],
+
+                        // 댓글 작성 시간
+                        Text(
+                          _formatTimeAgo(widget.comment.createdAt),
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  
+
                   // 작성자인 경우 더보기 버튼
                   currentUserAsync.maybeWhen(
-                    data: (currentUser) => currentUser?.id == widget.comment.userId
-                        ? CupertinoButton(
-                            padding: EdgeInsets.zero,
-                            onPressed: () {
-                              _showCommentOptions(context);
-                            },
-                            child: const Icon(
-                              CupertinoIcons.ellipsis_vertical,
-                              color: AppColors.textSecondary,
-                              size: 18,
-                            ),
-                          )
-                        : const SizedBox.shrink(),
+                    data: (currentUser) =>
+                        currentUser?.id == widget.comment.userId
+                            ? CupertinoButton(
+                                padding: EdgeInsets.zero,
+                                onPressed: () {
+                                  _showCommentOptions(context);
+                                },
+                                child: const Icon(
+                                  CupertinoIcons.ellipsis_vertical,
+                                  color: AppColors.textSecondary,
+                                  size: 18,
+                                ),
+                              )
+                            : const SizedBox.shrink(),
                     orElse: () => const SizedBox.shrink(),
                   ),
                 ],
               ),
             ),
-            
-            // 대댓글 섹션 레이블
-            Container(
+
+            // 이전 답글 헤더
+            Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-              alignment: Alignment.centerLeft,
-              child: const Text(
-                '답글',
-                style: TextStyle(
-                  color: AppColors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+              child: Row(
+                children: [
+                  const Text(
+                    '이 댓글에 대한 답글',
+                    style: TextStyle(
+                      color: AppColors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  
+                  // 답글 수 표시
+                  repliesAsync.when(
+                    data: (replies) => Text(
+                      '${replies.length}',
+                      style: const TextStyle(
+                        color: AppColors.primaryPurple,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    loading: () => const SizedBox.shrink(),
+                    error: (_, __) => const SizedBox.shrink(),
+                  ),
+                ],
               ),
             ),
-            
-            // 대댓글 목록
+
+            // 답글 목록
             Expanded(
               child: repliesAsync.when(
                 data: (replies) {
@@ -388,8 +392,7 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16.0),
                     itemCount: replies.length,
                     itemBuilder: (context, index) {
-                      final reply = replies[index];
-                      return _buildReplyItem(context, reply, currentUserAsync);
+                      return _buildReplyItem(context, replies[index], currentUserAsync);
                     },
                   );
                 },
@@ -399,199 +402,102 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
                 error: (error, _) => Center(
                   child: Text(
                     '답글을 불러오는 중 오류가 발생했습니다: $error',
-                    style: const TextStyle(color: AppColors.textEmphasis),
+                    style: const TextStyle(color: AppColors.textSecondary),
                     textAlign: TextAlign.center,
                   ),
                 ),
               ),
             ),
-            
+
             // 답글 입력 필드
-            if (!_isEditing) // 편집 모드가 아닐 때만 답글 입력 필드 표시
-              Container(
-                padding: const EdgeInsets.all(16.0),
-                color: AppColors.cardBackground,
-                child: Row(
-                  children: [
-                    // 사용자 아바타
-                    currentUserAsync.maybeWhen(
-                      data: (user) => user != null
-                          ? Container(
-                              margin: const EdgeInsets.only(right: 12.0),
-                              child: UserAvatar(
-                                imageUrl: user.profileImageUrl,
-                                size: 36,
-                              ),
-                            )
-                          : const SizedBox.shrink(),
-                      orElse: () => const SizedBox.shrink(),
-                    ),
-                    
-                    // 대댓글 입력 필드
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16.0,
-                          vertical: 8.0,
-                        ),
-                        decoration: BoxDecoration(
+            Container(
+              padding: const EdgeInsets.all(16.0),
+              color: AppColors.cardBackground,
+              child: Row(
+                children: [
+                  // 사용자 아바타
+                  currentUserAsync.maybeWhen(
+                    data: (user) => user != null
+                        ? Container(
+                            margin: const EdgeInsets.only(right: 12.0),
+                            child: UserAvatar(
+                              imageUrl: user.profileImageUrl,
+                              size: 36,
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                    orElse: () => const SizedBox.shrink(),
+                  ),
+
+                  // 답글 입력 필드
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16.0,
+                        vertical: 8.0,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.darkBackground,
+                        borderRadius: BorderRadius.circular(20.0),
+                      ),
+                      child: CupertinoTextField(
+                        controller: _replyController,
+                        focusNode: _replyFocusNode,
+                        placeholder: '답글 작성...',
+                        decoration: const BoxDecoration(
                           color: AppColors.darkBackground,
-                          borderRadius: BorderRadius.circular(20.0),
+                          border: null,
                         ),
-                        child: CupertinoTextField(
-                          controller: _commentController,
-                          focusNode: _commentFocusNode,
-                          placeholder: '답글 작성...',
-                          decoration: const BoxDecoration(
-                            color: AppColors.darkBackground,
-                            border: null,
-                          ),
-                          style: const TextStyle(color: AppColors.white),
-                          placeholderStyle: const TextStyle(
-                            color: AppColors.textSecondary,
-                          ),
-                          maxLines: 5,
-                          minLines: 1,
-                          keyboardType: TextInputType.multiline,
-                          padding: EdgeInsets.zero,
+                        style: const TextStyle(color: AppColors.white),
+                        placeholderStyle: const TextStyle(
+                          color: AppColors.textSecondary,
                         ),
+                        maxLines: 5,
+                        minLines: 1,
+                        keyboardType: TextInputType.multiline,
+                        padding: EdgeInsets.zero,
                       ),
                     ),
-                    
-                    // 전송 버튼
-                    const SizedBox(width: 8),
-                    CupertinoButton(
-                      padding: EdgeInsets.zero,
-                      onPressed: _isSubmitting ? null : _submitComment,
-                      child: _isSubmitting
-                          ? const CupertinoActivityIndicator()
-                          : const Icon(
-                              CupertinoIcons.paperplane_fill,
-                              color: AppColors.primaryPurple,
-                              size: 28,
-                            ),
-                    ),
-                  ],
-                ),
+                  ),
+
+                  // 전송 버튼
+                  const SizedBox(width: 8),
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    onPressed: _isSubmitting ? null : _submitReply,
+                    child: _isSubmitting
+                        ? const CupertinoActivityIndicator()
+                        : const Icon(
+                            CupertinoIcons.paperplane_fill,
+                            color: Color.fromARGB(0, 68, 46, 167),
+                            size: 28,
+                          ),
+                  ),
+                ],
               ),
-              
-            // 댓글 편집 필드 (편집 모드인 경우)
-            if (_isEditing)
-              Container(
-                padding: const EdgeInsets.all(16.0),
-                color: AppColors.cardBackground,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 편집 중 안내 표시
-                    Row(
-                      children: [
-                        const Text(
-                          '댓글 편집 중',
-                          style: TextStyle(
-                            color: AppColors.primaryPurple,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        CupertinoButton(
-                          padding: EdgeInsets.zero,
-                          onPressed: () {
-                            setState(() {
-                              _isEditing = false;
-                              _commentController.clear();
-                            });
-                            Navigator.pop(context);
-                          },
-                          child: const Text(
-                            '취소',
-                            style: TextStyle(
-                              color: AppColors.textSecondary,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    
-                    const SizedBox(height: 8),
-                    
-                    // 댓글 입력 필드
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16.0,
-                              vertical: 8.0,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.darkBackground,
-                              borderRadius: BorderRadius.circular(20.0),
-                            ),
-                            child: CupertinoTextField(
-                              controller: _commentController,
-                              focusNode: _commentFocusNode,
-                              placeholder: '댓글 작성...',
-                              decoration: const BoxDecoration(
-                                color: AppColors.darkBackground,
-                                border: null,
-                              ),
-                              style: const TextStyle(color: AppColors.white),
-                              placeholderStyle: const TextStyle(
-                                color: AppColors.textSecondary,
-                              ),
-                              maxLines: 5,
-                              minLines: 1,
-                              keyboardType: TextInputType.multiline,
-                              padding: EdgeInsets.zero,
-                            ),
-                          ),
-                        ),
-                        
-                        // 완료 버튼
-                        const SizedBox(width: 8),
-                        CupertinoButton(
-                          padding: EdgeInsets.zero,
-                          onPressed: _isSubmitting ? null : _submitComment,
-                          child: _isSubmitting
-                              ? const CupertinoActivityIndicator()
-                              : const Icon(
-                                  CupertinoIcons.checkmark_circle_fill,
-                                  color: AppColors.primaryPurple,
-                                  size: 28,
-                                ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
+            ),
           ],
         ),
       ),
     );
   }
-
-  // 대댓글 아이템 위젯
+  
+  // 답글 아이템 위젯
   Widget _buildReplyItem(
     BuildContext context,
     CommentModel reply,
     AsyncValue<dynamic> currentUserAsync,
   ) {
-    // 대댓글 작성자 정보
+    // 답글 작성자 정보
     final authorAsync = ref.watch(getUserProfileProvider(reply.userId));
     
-    // 현재 사용자가 대댓글 작성자인지 확인
+    // 현재 사용자가 답글 작성자인지 확인
     final isAuthor = currentUserAsync.valueOrNull?.id == reply.userId;
-    final isPostAuthor = widget.postUserId == reply.userId;
     
     return Container(
       margin: const EdgeInsets.only(bottom: 12.0),
       padding: const EdgeInsets.all(12.0),
       decoration: BoxDecoration(
-        // withOpacity 대신 withValues 사용 (Color.fromRGBO로 대체)
         color: const Color.fromRGBO(38, 38, 62, 0.3),
         borderRadius: BorderRadius.circular(12.0),
       ),
@@ -600,92 +506,51 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
         children: [
           // 작성자 아바타
           authorAsync.when(
-            data: (author) => GestureDetector(
-              onTap: () {
-                // 프로필 화면으로 이동
-                Navigator.of(context).push(
-                  CupertinoPageRoute(
-                    builder: (context) => ProfileScreen(
-                      userId: reply.userId,
-                    ),
-                  ),
-                );
-              },
-              child: UserAvatar(
-                imageUrl: author?.profileImageUrl,
-                size: 32,
-              ),
+            data: (author) => UserAvatar(
+              imageUrl: author?.profileImageUrl,
+              size: 32,
             ),
             loading: () => const SizedBox(
               width: 32,
               height: 32,
               child: CupertinoActivityIndicator(),
             ),
-            error: (_, __) => const SizedBox(
-              width: 32,
-              height: 32,
-            ),
+            error: (_, __) => const SizedBox(width: 32, height: 32),
           ),
           const SizedBox(width: 8),
           
-          // 대댓글 내용
+          // 답글 내용
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // 작성자 정보
-                Row(
-                  children: [
-                    authorAsync.when(
-                      data: (author) => Text(
-                        author?.username ?? '알 수 없는 사용자',
-                        style: const TextStyle(
-                          color: AppColors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                      loading: () => const SizedBox(
-                        width: 80,
-                        height: 12,
-                        child: CupertinoActivityIndicator(),
-                      ),
-                      error: (_, __) => const Text(
-                        '알 수 없는 사용자',
-                        style: TextStyle(
-                          color: AppColors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
+                authorAsync.when(
+                  data: (author) => Text(
+                    author?.username ?? '알 수 없는 사용자',
+                    style: const TextStyle(
+                      color: AppColors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
                     ),
-                    const SizedBox(width: 8),
-                    
-                    // 게시물 작성자 표시
-                    if (isPostAuthor)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color.fromRGBO(124, 95, 255, 0.3),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          '작성자',
-                          style: TextStyle(
-                            color: AppColors.primaryPurple,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                  ],
+                  ),
+                  loading: () => const SizedBox(
+                    width: 80,
+                    height: 12,
+                    child: CupertinoActivityIndicator(),
+                  ),
+                  error: (_, __) => const Text(
+                    '알 수 없는 사용자',
+                    style: TextStyle(
+                      color: AppColors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 2),
                 
-                // 대댓글 텍스트
+                // 답글 텍스트
                 Text(
                   reply.text,
                   style: const TextStyle(
@@ -695,96 +560,35 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
                 ),
                 const SizedBox(height: 4),
                 
-                // 대댓글 메타 정보 (작성 시간, 좋아요)
-                Row(
-                  children: [
-                    Text(
-                      _formatTimeAgo(reply.createdAt),
-                      style: const TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 11,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    
-                    // 좋아요 버튼
-                    currentUserAsync.when(
-                      data: (currentUser) => currentUser != null
-                          ? _buildLikeButton(reply, currentUser.id, isReply: true)
-                          : const SizedBox.shrink(),
-                      loading: () => const SizedBox.shrink(),
-                      error: (_, __) => const SizedBox.shrink(),
-                    ),
-                    
-                    const Spacer(),
-                    
-                    // 작성자인 경우 더보기 버튼
-                    if (isAuthor)
-                      CupertinoButton(
-                        padding: EdgeInsets.zero,
-                        onPressed: () {
-                          _showReplyOptions(context, reply);
-                        },
-                        child: const Icon(
-                          CupertinoIcons.ellipsis_vertical,
-                          color: AppColors.textSecondary,
-                          size: 16,
-                        ),
-                      ),
-                  ],
+                // 답글 작성 시간
+                Text(
+                  _formatTimeAgo(reply.createdAt),
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 11,
+                  ),
                 ),
               ],
             ),
           ),
+          
+          // 작성자인 경우 더보기 버튼
+          if (isAuthor)
+            CupertinoButton(
+              padding: EdgeInsets.zero,
+              onPressed: () {
+                _showReplyOptions(context, reply);
+              },
+              child: const Icon(
+                CupertinoIcons.ellipsis_vertical,
+                color: AppColors.textSecondary,
+                size: 16,
+              ),
+            ),
         ],
       ),
     );
   }
-
-  // 좋아요 버튼 위젯
-  Widget _buildLikeButton(CommentModel comment, String userId, {bool isReply = false}) {
-  // 좋아요 상태 가져오기
-  final likeStatusAsync = ref.watch(
-    commentLikeStatusProvider({'commentId': comment.id, 'userId': userId})
-  );
-  
-  return likeStatusAsync.when(
-    data: (isLiked) => GestureDetector(
-      onTap: () {
-        ref.read(commentControllerProvider.notifier).toggleLike(
-          commentId: comment.id,
-          userId: userId,
-          postId: widget.postId, // postId 추가
-        );
-      },
-      child: Row(
-        children: [
-          Icon(
-            isLiked ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
-            color: isLiked ? CupertinoColors.systemRed : AppColors.textSecondary,
-            size: isReply ? 12 : 14,
-          ),
-          if (comment.likesCount > 0) ...[
-            const SizedBox(width: 4),
-            Text(
-              comment.likesCount.toString(),
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: isReply ? 11 : 12,
-              ),
-            ),
-          ],
-        ],
-      ),
-    ),
-    loading: () => const CupertinoActivityIndicator(radius: 6),
-    error: (_, __) => Icon(
-      CupertinoIcons.heart,
-      color: AppColors.textSecondary,
-      size: isReply ? 12 : 14,
-    ),
-  );
-}
 
   // 메인 댓글 옵션 메뉴
   void _showCommentOptions(BuildContext context) {
@@ -794,25 +598,10 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
         title: const Text('댓글 옵션'),
         actions: [
           CupertinoActionSheetAction(
-            onPressed: () {
-              Navigator.pop(context);
-              setState(() {
-                _isEditing = true;
-                _commentController.text = widget.comment.text;
-              });
-              _commentFocusNode.requestFocus();
-            },
-            child: const Text('수정'),
-          ),
-          CupertinoActionSheetAction(
             isDestructiveAction: true,
             onPressed: () async {
               Navigator.pop(context);
-              _showDeleteConfirmation(
-                context, 
-                widget.commentId,
-                isMainComment: true,
-              );
+              _showDeleteConfirmation(context);
             },
             child: const Text('삭제'),
           ),
@@ -824,8 +613,8 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
       ),
     );
   }
-
-  // 대댓글 옵션 메뉴
+  
+  // 답글 옵션 메뉴
   void _showReplyOptions(BuildContext context, CommentModel reply) {
     showCupertinoModalPopup(
       context: context,
@@ -833,27 +622,10 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
         title: const Text('답글 옵션'),
         actions: [
           CupertinoActionSheetAction(
-            onPressed: () {
-              Navigator.pop(context);
-              // 답글 수정 화면으로 이동 (간단하게 구현)
-              setState(() {
-                _isEditing = true;
-                _commentController.text = reply.text;
-              });
-              _commentFocusNode.requestFocus();
-            },
-            child: const Text('수정'),
-          ),
-          CupertinoActionSheetAction(
             isDestructiveAction: true,
             onPressed: () async {
               Navigator.pop(context);
-              _showDeleteConfirmation(
-                context, 
-                reply.id,
-                isMainComment: false,
-                parentId: reply.parentId,
-              );
+              _showDeleteReplyConfirmation(context, reply);
             },
             child: const Text('삭제'),
           ),
@@ -867,20 +639,12 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
   }
 
   // 삭제 확인 다이얼로그
-  void _showDeleteConfirmation(
-    BuildContext context, 
-    String commentId, 
-    {required bool isMainComment, String? parentId}
-  ) {
+  void _showDeleteConfirmation(BuildContext context) {
     showCupertinoDialog(
       context: context,
       builder: (context) => CupertinoAlertDialog(
-        title: Text(isMainComment ? '댓글 삭제' : '답글 삭제'),
-        content: Text(
-          isMainComment 
-              ? '이 댓글을 정말 삭제하시겠습니까? 모든 대댓글도 함께 삭제됩니다.'
-              : '이 답글을 정말 삭제하시겠습니까?'
-        ),
+        title: const Text('댓글 삭제'),
+        content: const Text('이 댓글을 정말 삭제하시겠습니까?'),
         actions: [
           CupertinoDialogAction(
             onPressed: () => Navigator.pop(context),
@@ -890,7 +654,32 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
             isDestructiveAction: true,
             onPressed: () {
               Navigator.pop(context);
-              _deleteComment(commentId, parentId);
+              _deleteComment();
+            },
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  // 답글 삭제 확인 다이얼로그
+  void _showDeleteReplyConfirmation(BuildContext context, CommentModel reply) {
+    showCupertinoDialog(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: const Text('답글 삭제'),
+        content: const Text('이 답글을 정말 삭제하시겠습니까?'),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('취소'),
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            onPressed: () async {
+              Navigator.pop(context);
+              await _deleteReply(reply);
             },
             child: const Text('삭제'),
           ),
@@ -899,19 +688,17 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
     );
   }
 
-  // 댓글/대댓글 삭제
-  void _deleteComment(String commentId, String? parentId) async {
+  // 댓글 삭제
+  void _deleteComment() async {
     try {
       await ref.read(commentControllerProvider.notifier).deleteComment(
-        commentId: commentId,
-        postId: widget.postId,
-        parentId: parentId,
-      );
-      
-      _refreshData();
-      
+            commentId: widget.commentId,
+            postId: widget.postId,
+            isReply: false,
+          );
+
       // 메인 댓글을 삭제한 경우 화면을 닫음
-      if (commentId == widget.commentId && mounted) {
+      if (mounted) {
         Navigator.pop(context);
       }
     } catch (e) {
@@ -919,12 +706,34 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
       _showErrorDialog('삭제 실패', '댓글을 삭제하는 중 오류가 발생했습니다: $e');
     }
   }
+  
+  // 답글 삭제
+  Future<void> _deleteReply(CommentModel reply) async {
+    try {
+      await ref.read(commentControllerProvider.notifier).deleteComment(
+            commentId: reply.id,
+            postId: widget.postId,
+            isReply: true,
+          );
+      
+      // 답글 삭제 후 목록 새로고침
+      if (mounted) {
+        _showToast('답글이 삭제되었습니다');
+        _refreshData();
+      }
+    } catch (e) {
+      debugPrint('답글 삭제 실패: $e');
+      if (mounted) {
+        _showErrorDialog('삭제 실패', '답글을 삭제하는 중 오류가 발생했습니다: $e');
+      }
+    }
+  }
 
   // 시간 형식 포맷팅
   String _formatTimeAgo(DateTime dateTime) {
     final now = DateTime.now();
     final difference = now.difference(dateTime);
-    
+
     if (difference.inDays > 365) {
       return '${(difference.inDays / 365).floor()}년 전';
     } else if (difference.inDays > 30) {

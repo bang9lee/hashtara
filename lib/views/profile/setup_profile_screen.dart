@@ -1,6 +1,8 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 import 'package:hashtara/constants/app_colors.dart'; // 'package:' import로 변경
 import 'package:hashtara/constants/app_strings.dart'; // 'package:' import로 변경
 import 'package:hashtara/providers/auth_provider.dart'; // 'package:' import로 변경
@@ -84,14 +86,40 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
   final _nameController = TextEditingController();
   final _usernameController = TextEditingController();
   final _bioController = TextEditingController();
-
+  
+  // 이미지 피커 관련 변수 추가
+  File? _profileImage;
+  final ImagePicker _picker = ImagePicker();
+  
   bool _nameError = false;
   bool _usernameError = false;
+  bool _isSelectingImage = false; // 이미지 선택 중 상태 추가
 
   @override
   void initState() {
     super.initState();
     debugPrint('SetupProfileScreen 초기화됨: ${widget.userId}');
+    
+    // Android에서 앱이 백그라운드로 이동했다가 돌아왔을 때 데이터 복구
+    if (Platform.isAndroid) {
+      _retrieveLostData();
+    }
+  }
+  
+  // 이미지 선택 데이터 복구 기능 추가
+  Future<void> _retrieveLostData() async {
+    final LostDataResponse response = await _picker.retrieveLostData();
+    if (response.isEmpty) {
+      return;
+    }
+    if (response.file != null) {
+      setState(() {
+        _profileImage = File(response.file!.path);
+      });
+    } else {
+      // 에러 처리
+      debugPrint('이미지 데이터 손실 에러: ${response.exception}');
+    }
   }
 
   @override
@@ -105,6 +133,106 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
   bool _isValidUsername(String username) {
     final validUsernameRegex = RegExp(r'^[a-zA-Z0-9_]+$');
     return validUsernameRegex.hasMatch(username);
+  }
+  
+  // 갤러리에서 이미지 선택
+  Future<void> _pickImageFromGallery() async {
+    setState(() {
+      _isSelectingImage = true;
+    });
+
+    try {
+      final XFile? pickedFile = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 90,
+      );
+
+      if (pickedFile != null && mounted) {
+        setState(() {
+          _profileImage = File(pickedFile.path);
+        });
+      }
+    } catch (e) {
+      debugPrint('갤러리 이미지 선택 오류: $e');
+      ref.read(profileSetupStateProvider.notifier).setError('이미지 선택 중 오류가 발생했습니다: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSelectingImage = false;
+        });
+      }
+    }
+  }
+
+  // 카메라로 이미지 촬영
+  Future<void> _pickImageFromCamera() async {
+    setState(() {
+      _isSelectingImage = true;
+    });
+
+    try {
+      final XFile? pickedFile = await _picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 90,
+      );
+
+      if (pickedFile != null && mounted) {
+        setState(() {
+          _profileImage = File(pickedFile.path);
+        });
+      }
+    } catch (e) {
+      debugPrint('카메라 이미지 촬영 오류: $e');
+      ref.read(profileSetupStateProvider.notifier).setError('카메라 사용 중 오류가 발생했습니다: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSelectingImage = false;
+        });
+      }
+    }
+  }
+
+  // 이미지 선택 옵션 표시
+  void _showImageSourceActionSheet() {
+    if (_isSelectingImage) return; // 이미 선택 중이면 중단
+    
+    showCupertinoModalPopup(
+      context: context,
+      builder: (BuildContext context) {
+        return CupertinoActionSheet(
+          title: const Text('프로필 이미지 선택'),
+          message: const Text('프로필 이미지를 선택하세요'),
+          actions: <CupertinoActionSheetAction>[
+            CupertinoActionSheetAction(
+              onPressed: () {
+                Navigator.pop(context);
+                _pickImageFromGallery();
+              },
+              child: const Text('갤러리에서 선택'),
+            ),
+            CupertinoActionSheetAction(
+              onPressed: () {
+                Navigator.pop(context);
+                _pickImageFromCamera();
+              },
+              child: const Text('카메라로 촬영'),
+            ),
+          ],
+          cancelButton: CupertinoActionSheetAction(
+            isDestructiveAction: true,
+            onPressed: () {
+              Navigator.pop(context);
+            },
+            child: const Text('취소'),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _saveProfile() async {
@@ -133,11 +261,21 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
 
     try {
       debugPrint('프로필 저장 시도: ${widget.userId}');
+      
+      // 이미지 업로드 로직 추가
+      String? profileImageUrl;
+      if (_profileImage != null) {
+        profileImageUrl = await ref.read(profileRepositoryProvider).uploadProfileImage(
+          widget.userId,
+          _profileImage!,
+        );
+      }
+      
       await ref.read(authRepositoryProvider).createUserDocument(
             widget.userId,
             _nameController.text.trim(),
             _usernameController.text.trim(),
-            null,
+            profileImageUrl, // 프로필 이미지 URL 전달
           );
       await ref.read(profileRepositoryProvider).createProfileDocument(
             widget.userId,
@@ -241,13 +379,76 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
                 SizedBox(height: verticalSpacing),
                 const Text(AppStrings.profileSetupDesc, style: TextStyle(color: AppColors.textEmphasis, fontSize: 16.0), textAlign: TextAlign.center),
                 SizedBox(height: verticalSpacing * 2),
+                
+                // 프로필 이미지 선택 영역 - 탭 동작 개선
                 Center(
-                  child: Container(
-                    width: circleSize, height: circleSize,
-                    decoration: BoxDecoration(color: AppColors.cardBackground, shape: BoxShape.circle, border: Border.all(color: AppColors.separator, width: 2.0)),
-                    child: const Icon(CupertinoIcons.person_fill, size: 60, color: AppColors.textEmphasis),
+                  child: GestureDetector(
+                    onTap: _isSelectingImage ? null : _showImageSourceActionSheet,
+                    child: Stack(
+                      children: [
+                        Container(
+                          width: circleSize, 
+                          height: circleSize,
+                          decoration: BoxDecoration(
+                            color: AppColors.cardBackground, 
+                            shape: BoxShape.circle, 
+                            border: Border.all(color: AppColors.separator, width: 2.0)
+                          ),
+                          child: _profileImage != null
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(circleSize / 2),
+                                  child: Image.file(
+                                    _profileImage!,
+                                    width: circleSize,
+                                    height: circleSize,
+                                    fit: BoxFit.cover,
+                                  ),
+                                )
+                              : _isSelectingImage 
+                                  ? const CupertinoActivityIndicator()
+                                  : const Icon(
+                                      CupertinoIcons.person_fill, 
+                                      size: 60, 
+                                      color: AppColors.textEmphasis
+                                    ),
+                        ),
+                        // 카메라 아이콘 오버레이
+                        Positioned(
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: const BoxDecoration(
+                              color: AppColors.primaryPurple,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              CupertinoIcons.camera_fill,
+                              size: 20,
+                              color: CupertinoColors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
+                
+                SizedBox(height: verticalSpacing),
+                // 이미지 선택 버튼 - 명시적으로 추가
+                Center(
+                  child: CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    onPressed: _isSelectingImage ? null : _showImageSourceActionSheet,
+                    child: Text(
+                      _profileImage != null ? '이미지 변경하기' : '이미지 선택하기',
+                      style: TextStyle(
+                        color: _isSelectingImage ? AppColors.textSecondary : AppColors.primaryPurple,
+                      ),
+                    ),
+                  ),
+                ),
+                
                 SizedBox(height: verticalSpacing * 1.5),
                 Row(
                   children: [

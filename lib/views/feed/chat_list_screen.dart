@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../../constants/app_colors.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/chat_provider.dart';
+import '../../../providers/profile_provider.dart';
 import 'chat_detail_screen.dart';
 
 class ChatsListScreen extends ConsumerStatefulWidget {
@@ -149,7 +150,7 @@ class _ChatsListScreenState extends ConsumerState<ChatsListScreen> {
       imageUrl = chat.groupImageUrl;
     } else {
       // 1:1 채팅인 경우 상대방 정보 가져오기
-      final otherUserAsync = ref.watch(getUserProfileProvider(otherUserId));
+      final otherUserAsync = ref.watch(getProfileProvider(otherUserId));
       
       return otherUserAsync.when(
         data: (otherUser) {
