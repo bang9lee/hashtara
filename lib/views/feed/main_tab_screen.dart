@@ -268,27 +268,37 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
               builder: (_) => const ChatsListScreen(),
             );
           case 4:
+            // 프로필 화면 - 로그인된 사용자가 있는 경우 프로필 화면 표시
             return CupertinoTabView(
               navigatorKey: _navigatorKeys[4],
-              builder: (_) => currentUser.when(
-                data: (user) => user != null
-                    ? ProfileScreen(userId: user.id)
-                    : const Center(
+              builder: (context) {
+                // 로그인 상태를 확인
+                final authState = ref.watch(authStateProvider);
+                
+                return authState.when(
+                  data: (user) {
+                    if (user != null) {
+                      return ProfileScreen(userId: user.uid);
+                    } else {
+                      return const Center(
                         child: Text(
                           '로그인이 필요합니다',
                           style: TextStyle(color: AppColors.white),
                         ),
-                      ),
-                loading: () => const Center(
-                  child: CupertinoActivityIndicator(),
-                ),
-                error: (_, __) => const Center(
-                  child: Text(
-                    '사용자 정보를 불러올 수 없습니다.',
-                    style: TextStyle(color: AppColors.white),
+                      );
+                    }
+                  },
+                  loading: () => const Center(
+                    child: CupertinoActivityIndicator(),
                   ),
-                ),
-              ),
+                  error: (e, stack) => Center(
+                    child: Text(
+                      '사용자 정보를 불러올 수 없습니다: $e',
+                      style: const TextStyle(color: AppColors.white),
+                    ),
+                  ),
+                );
+              },
             );
           default:
             return CupertinoTabView(

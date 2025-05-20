@@ -1,29 +1,61 @@
 import 'package:flutter/cupertino.dart';
-import 'package:flutter_localizations/flutter_localizations.dart'; // 지역화 패키지만 추가
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'constants/app_colors.dart';
 import 'views/common/splash_screen.dart';
 import 'views/auth/login_screen.dart';
 import 'views/profile/setup_profile_screen.dart';
+import 'views/auth/terms_agreement_screen.dart';
 import 'views/feed/main_tab_screen.dart';
 import 'providers/auth_provider.dart';
 
 // 초기 라우팅 상태를 관리하는 프로바이더
 final initialRouteProvider = StateProvider<String>((ref) => 'splash');
 
-class HashtaraApp extends ConsumerWidget {
+class HashtaraApp extends ConsumerStatefulWidget {
   const HashtaraApp({Key? key}) : super(key: key);
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HashtaraApp> createState() => _HashtaraAppState();
+}
+
+class _HashtaraAppState extends ConsumerState<HashtaraApp> {
+  @override
+  void initState() {
+    super.initState();
+    
+    // 앱 시작 시 로컬 저장소에서 회원가입 진행 상태 불러오기
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadSavedSignupProgress();
+    });
+  }
+  
+  // 저장된 회원가입 진행 상태 불러오기
+  Future<void> _loadSavedSignupProgress() async {
+    try {
+      final savedState = await loadSignupProgress();
+      if (savedState['userId'] != null) {
+        // 저장된 상태가 있으면 메모리에 복원
+        ref.read(signupProgressProvider.notifier).state = savedState['progress'];
+        debugPrint('저장된 회원가입 상태 복원: ${savedState['progress']}, 사용자: ${savedState['userId']}');
+      }
+    } catch (e) {
+      debugPrint('저장된 회원가입 상태 로드 실패: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     // 로그인 상태를 확인하는 프로바이더 사용
     final authState = ref.watch(authStateProvider);
     
-    // 디버그 로그 추가
-    debugPrint('HashtaraApp 리빌드됨 - AuthState: ${authState.valueOrNull != null ? '로그인됨' : '로그인안됨'}');
+    // 회원가입 진행 상태 확인
+    final signupProgress = ref.watch(signupProgressProvider);
     
-    // 스플래시 화면 후 authState에 따라 화면 결정
+    // 디버그 로그 추가
+    debugPrint('HashtaraApp 리빌드됨 - AuthState: ${authState.valueOrNull != null ? '로그인됨' : '로그인안됨'}, 진행상태: $signupProgress');
+    
+    // 스플래시 화면 후 authState와 signupProgress에 따라 화면 결정
     return CupertinoApp(
       title: 'Hashtara',
       theme: const CupertinoThemeData(
@@ -37,7 +69,6 @@ class HashtaraApp extends ConsumerWidget {
         ),
       ),
       localizationsDelegates: const [
-        // 리스트에 const 추가 (패키지 import 이후 상수로 사용 가능)
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
@@ -59,50 +90,22 @@ class HashtaraApp extends ConsumerWidget {
           } else {
             debugPrint('✅ 로그인된 사용자 확인: ${user.uid}');
             
-            // 로그인된 경우 프로필 완료 상태 확인
-            return FutureBuilder<DocumentSnapshot>(
-              future: FirebaseFirestore.instance.collection('users').doc(user.uid).get(),
-              builder: (context, snapshot) {
-                // 로딩 중
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  debugPrint('문서 로딩 중...');
-                  return const SplashScreen();
-                }
-                
-                // 오류 발생 시 로그인 화면으로
-                if (snapshot.hasError) {
-                  debugPrint('❌ 사용자 문서 로드 오류: ${snapshot.error}');
-                  return const SplashToLoginScreen();
-                }
-                
-                // 사용자 문서 확인
-                debugPrint('문서 스냅샷: ${snapshot.hasData}, 문서 존재: ${snapshot.data?.exists}');
-                
-                if (snapshot.hasData && snapshot.data!.exists) {
-                  final userData = snapshot.data!.data() as Map<String, dynamic>?;
-                  
-                  // 명시적으로 profileComplete 필드 값을 확인하고 로그 출력
-                  final profileComplete = userData?['profileComplete'];
-                  debugPrint('🔍 profileComplete 필드 값: $profileComplete (${profileComplete.runtimeType})');
-                  
-                  final bool isProfileComplete = profileComplete == true;
-                  
-                  debugPrint('📋 사용자 문서: $userData');
-                  debugPrint('🔍 프로필 설정 완료 여부: $isProfileComplete');
-                  
-                  if (!isProfileComplete) {
-                    debugPrint('➡️ 프로필 설정 필요: ${user.uid}, SetupProfileScreen으로 이동');
-                    return SetupProfileScreen(userId: user.uid);
-                  } else {
-                    debugPrint('➡️ 메인 화면으로 이동');
-                    return const MainTabScreen();
-                  }
-                } else {
-                  debugPrint('❓ 사용자 문서 없음: ${user.uid}, 프로필 설정 화면으로 이동');
-                  return SetupProfileScreen(userId: user.uid);
-                }
-              },
-            );
+            // 유저 정보 명시적으로 로드
+            ref.read(currentUserProvider);
+            
+            // 현재 회원가입 진행 상태에 따라 화면 결정
+            switch (signupProgress) {
+              case SignupProgress.registered:
+                debugPrint('➡️ 약관 동의 필요: ${user.uid}');
+                return TermsAgreementScreen(userId: user.uid);
+              case SignupProgress.termsAgreed:
+                debugPrint('➡️ 프로필 설정 필요: ${user.uid}');
+                return SetupProfileScreen(userId: user.uid);
+              case SignupProgress.completed:
+              case SignupProgress.none:
+                debugPrint('➡️ 메인 화면으로 이동');
+                return const MainTabScreen();
+            }
           }
         },
         loading: () {
@@ -160,8 +163,8 @@ class _SplashToLoginScreenState extends State<SplashToLoginScreen> {
   @override
   void initState() {
     super.initState();
-    // 3초 후 로그인 화면으로 전환 (한번만 실행되도록 플래그 사용)
-    Future.delayed(const Duration(seconds: 3), () {
+    // 2초 후 로그인 화면으로 전환 (한번만 실행되도록 플래그 사용)
+    Future.delayed(const Duration(seconds: 2), () {
       if (mounted && !_isNavigating) {
         _isNavigating = true; // 네비게이션 시작 플래그 설정
         // 다음 프레임에서 네비게이션 실행

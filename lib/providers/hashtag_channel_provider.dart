@@ -165,6 +165,9 @@ class HashtagSearchNotifier extends StateNotifier<AsyncValue<List<HashtagChannel
   }
 }
 
+// 네비게이션 안전성을 위한 프로바이더
+final channelDetailNavLockProvider = StateProvider<bool>((ref) => false);
+
 // 해시태그 채널 관리 프로바이더
 final hashtagChannelControllerProvider = StateNotifierProvider<HashtagChannelController, AsyncValue<void>>(
   (ref) {
@@ -267,7 +270,7 @@ class HashtagChannelController extends StateNotifier<AsyncValue<void>> {
     }
   }
 
-  // 해시태그 채널 게시물 수 업데이트 - 개선된 버전
+  // 해시태그 채널 게시물 수 업데이트
   Future<void> updateChannelPostsCount(String channelName) async {
     if (channelName.isEmpty) {
       debugPrint('채널 게시물 수 업데이트 실패: 채널 이름이 비어있습니다.');

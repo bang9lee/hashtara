@@ -9,6 +9,9 @@ import '../../../models/hashtag_channel_model.dart';
 import '../../../models/post_model.dart';
 import '../widgets/post_card.dart';
 
+// 네비게이션 안전성을 위한 프로바이더
+final channelDetailNavLockProvider = StateProvider<bool>((ref) => false);
+
 class HashtagChannelDetailScreen extends ConsumerStatefulWidget {
   final String channelId;
   final String channelName;
@@ -24,18 +27,25 @@ class HashtagChannelDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _HashtagChannelDetailScreenState extends ConsumerState<HashtagChannelDetailScreen> {
-  List<PostModel> _posts = [];  // Map에서 PostModel 리스트로 변경
+  List<PostModel> _posts = []; 
   bool _isLoadingPosts = true;
   String? _errorMessage;
+  bool _isSubscriptionLoading = false;
+  bool _isNavigating = false; // 네비게이션 상태 추적을 위한 변수
   
   @override
   void initState() {
     super.initState();
     _loadPosts();
     
-    // 화면 진입 시 채널 게시물 수 업데이트
+    // 화면 진입 시 채널 게시물 수 업데이트 및 네비게이션 락 초기화
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _updateChannelPostsCount();
+      // 네비게이션 락 초기화
+      ref.read(channelDetailNavLockProvider.notifier).state = false;
+      setState(() {
+        _isNavigating = false;
+      });
     });
   }
   
@@ -66,10 +76,9 @@ class _HashtagChannelDetailScreenState extends ConsumerState<HashtagChannelDetai
           .limit(20)
           .get();
 
-      // Firestore 문서를 PostModel로 변환 - fromFirestore 메서드 사용
+      // Firestore 문서를 PostModel로 변환
       final posts = postsSnapshot.docs.map((doc) {
         try {
-          // PostModel.fromFirestore 사용 - fromMap 대신
           return PostModel.fromFirestore(doc);
         } catch (e) {
           debugPrint('게시물 파싱 오류: $e');
@@ -99,11 +108,71 @@ class _HashtagChannelDetailScreenState extends ConsumerState<HashtagChannelDetai
     }
   }
 
+  // 구독 버튼 클릭 핸들러
+  Future<void> _handleSubscription() async {
+    final user = ref.read(authStateProvider).valueOrNull;
+    if (user == null) {
+      // 로그인 안 된 경우 처리
+      _showLoginRequiredDialog();
+      return;
+    }
+
+    // 중복 클릭 방지
+    if (_isSubscriptionLoading) return;
+
+    setState(() {
+      _isSubscriptionLoading = true;
+    });
+
+    try {
+      // 구독 상태에 따라 다른 메서드 호출
+      final subKey = '$user.uid:${widget.channelId}';
+      final isSubscribed = ref.read(channelSubscriptionProvider(subKey)).valueOrNull ?? false;
+      
+      final channelController = ref.read(hashtagChannelControllerProvider.notifier);
+      
+      if (isSubscribed) {
+        await channelController.unsubscribeFromChannel(user.uid, widget.channelId);
+      } else {
+        await channelController.subscribeToChannel(user.uid, widget.channelId);
+      }
+    } catch (e) {
+      debugPrint('구독 처리 오류: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubscriptionLoading = false;
+        });
+      }
+    }
+  }
+
+  // 로그인 필요 다이얼로그
+  void _showLoginRequiredDialog() {
+    showCupertinoDialog(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: const Text('로그인 필요'),
+        content: const Text('채널을 구독하려면 로그인이 필요합니다.'),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('확인'),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // 채널 정보 한 번만 조회하도록 개선
+    // 채널 정보 
     final channelAsync = ref.watch(hashtagChannelProvider(widget.channelId));
+    // 현재 사용자
     final currentUser = ref.watch(currentUserProvider).valueOrNull;
+    // 네비게이션 잠금 상태
+    final isLocalNavLocked = ref.watch(channelDetailNavLockProvider);
+    final isNavLocked = isLocalNavLocked || _isNavigating;
 
     return CupertinoPageScaffold(
       backgroundColor: AppColors.darkBackground,
@@ -116,7 +185,14 @@ class _HashtagChannelDetailScreenState extends ConsumerState<HashtagChannelDetai
         ),
         leading: CupertinoButton(
           padding: EdgeInsets.zero,
-          onPressed: () => Navigator.pop(context),
+          onPressed: isNavLocked 
+            ? null 
+            : () {
+              // 네비게이션 락 설정 (중복 네비게이션 방지)
+              setState(() { _isNavigating = true; });
+              ref.read(channelDetailNavLockProvider.notifier).state = true;
+              Navigator.pop(context);
+            },
           child: const Icon(CupertinoIcons.back, color: AppColors.white),
         ),
         trailing: currentUser != null
@@ -132,7 +208,7 @@ class _HashtagChannelDetailScreenState extends ConsumerState<HashtagChannelDetai
             
             return Column(
               children: [
-                _buildChannelHeader(channel, currentUser?.id),
+                _buildChannelHeader(channel, currentUser?.id, isNavLocked),
                 Expanded(
                   child: _isLoadingPosts
                       ? const Center(child: CupertinoActivityIndicator())
@@ -145,7 +221,10 @@ class _HashtagChannelDetailScreenState extends ConsumerState<HashtagChannelDetai
                                   const SizedBox(height: 16),
                                   Text(_errorMessage!, style: const TextStyle(color: AppColors.textEmphasis), textAlign: TextAlign.center),
                                   const SizedBox(height: 16),
-                                  CupertinoButton(onPressed: _loadPosts, child: const Text('다시 시도')),
+                                  CupertinoButton(
+                                    onPressed: isNavLocked ? null : _loadPosts, 
+                                    child: const Text('다시 시도')
+                                  ),
                                 ],
                               ),
                             )
@@ -164,8 +243,10 @@ class _HashtagChannelDetailScreenState extends ConsumerState<HashtagChannelDetai
                                   color: Colors.transparent,
                                   child: RefreshIndicator(
                                     onRefresh: () async {
-                                      await _loadPosts();
-                                      await _updateChannelPostsCount(); 
+                                      if (!isNavLocked) {
+                                        await _loadPosts();
+                                        await _updateChannelPostsCount(); 
+                                      }
                                     },
                                     color: AppColors.primaryPurple,
                                     child: ListView.builder(
@@ -173,13 +254,20 @@ class _HashtagChannelDetailScreenState extends ConsumerState<HashtagChannelDetai
                                       itemCount: _posts.length,
                                       itemBuilder: (context, index) {
                                         final post = _posts[index];
-                                        // PostCard 위젯에 post 객체 전달
                                         return Padding(
                                           padding: const EdgeInsets.only(bottom: 16.0),
-                                          child: PostCard(
-                                            post: post,
-                                            showFullCaption: false,
-                                          ),
+                                          child: isNavLocked
+                                            ? Opacity(
+                                                opacity: 0.7,
+                                                child: PostCard(
+                                                  post: post,
+                                                  showFullCaption: false,
+                                                ),
+                                              )
+                                            : PostCard(
+                                                post: post,
+                                                showFullCaption: false,
+                                              ),
                                         );
                                       },
                                     ),
@@ -197,39 +285,30 @@ class _HashtagChannelDetailScreenState extends ConsumerState<HashtagChannelDetai
   }
 
   Widget _buildSubscriptionButton(String userId) {
-    // 안전하게 구독 상태 확인
-    if (!_isSubscriptionParamsInitialized(userId)) {
-      return const SizedBox.shrink();
-    }
-    
-    // 구독 상태 String 키로 확인 (맵 객체 대신 문자열 사용)
-    final subKey = _getSubscriptionKey(userId);
+    // 문자열 키로 구독 상태 조회
+    final subKey = '$userId:${widget.channelId}';
     final subscriptionState = ref.watch(channelSubscriptionProvider(subKey));
     
     // 채널 구독 컨트롤러
     final channelController = ref.watch(hashtagChannelControllerProvider);
     
     // 컨트롤러의 상태와 구독 상태 모두 고려하여 로딩 상태 결정
-    final isLoading = subscriptionState.isLoading || channelController.isLoading;
+    final isLoading = subscriptionState.isLoading || channelController.isLoading || _isSubscriptionLoading;
+    final isNavLocked = ref.watch(channelDetailNavLockProvider) || _isNavigating;
 
     return CupertinoButton(
       padding: EdgeInsets.zero,
-      onPressed: () {
-        // 로딩 중이면 중복 클릭 방지
-        if (isLoading) return;
-        
-        // 구독 상태에 따라 다른 메서드 호출
-        subscriptionState.whenData((isSubscribed) {
-          debugPrint('구독 버튼 클릭: 현재 상태 = $isSubscribed');
-          if (isSubscribed) {
-            ref.read(hashtagChannelControllerProvider.notifier)
-               .unsubscribeFromChannel(userId, widget.channelId);
-          } else {
-            ref.read(hashtagChannelControllerProvider.notifier)
-               .subscribeToChannel(userId, widget.channelId);
-          }
-        });
-      },
+      onPressed: (isLoading || isNavLocked) 
+        ? null 
+        : () {
+          // 네비게이션 잠금 상태에서는 작동하지 않음
+          if (isNavLocked) return;
+          
+          // 로딩 중이면 중복 클릭 방지
+          if (isLoading) return;
+          
+          _handleSubscription();
+        },
       child: subscriptionState.when(
         data: (isSubscribed) {
           return Icon(
@@ -243,48 +322,7 @@ class _HashtagChannelDetailScreenState extends ConsumerState<HashtagChannelDetai
     );
   }
 
-  Widget _buildChannelHeader(HashtagChannelModel channel, String? userId) {
-    if (userId == null) {
-      return _buildChannelHeaderContent(channel, false, null);
-    }
-    
-    // 구독 파라미터 초기화 확인
-    if (!_isSubscriptionParamsInitialized(userId)) {
-      return _buildChannelHeaderContent(channel, true, null);
-    }
-    
-    // 문자열 키로 구독 상태 조회
-    final subKey = _getSubscriptionKey(userId);
-    final subscriptionState = ref.watch(channelSubscriptionProvider(subKey));
-    
-    // 구독 컨트롤러 로딩 상태 확인
-    final channelController = ref.watch(hashtagChannelControllerProvider);
-    final isLoading = subscriptionState.isLoading || channelController.isLoading;
-    
-    return _buildChannelHeaderContent(
-      channel, 
-      isLoading, 
-      subscriptionState,
-    );
-  }
-  
-  // 구독 파라미터 초기화되었는지 확인하는 헬퍼 메서드
-  bool _isSubscriptionParamsInitialized(String userId) {
-    return widget.channelId.isNotEmpty && userId.isNotEmpty;
-  }
-  
-  // 구독 키 생성 - 단순 문자열 결합으로 처리
-  String _getSubscriptionKey(String userId) {
-    return '$userId:${widget.channelId}';
-  }
-  
-  Widget _buildChannelHeaderContent(
-    HashtagChannelModel channel, 
-    bool isLoading, 
-    AsyncValue<bool>? subscriptionState
-  ) {
-    final userId = ref.read(currentUserProvider).valueOrNull?.id;
-    
+  Widget _buildChannelHeader(HashtagChannelModel channel, String? userId, bool isNavLocked) {
     return Container(
       padding: const EdgeInsets.all(16.0),
       decoration: const BoxDecoration(
@@ -367,75 +405,72 @@ class _HashtagChannelDetailScreenState extends ConsumerState<HashtagChannelDetai
             ),
           ],
           const SizedBox(height: 16),
-          if (userId != null && subscriptionState != null)
-            subscriptionState.when(
-              data: (isSubscribed) {
-                return SizedBox(
-                  width: double.infinity,
-                  child: CupertinoButton(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    color: isSubscribed ? AppColors.cardBackground : AppColors.primaryPurple,
-                    borderRadius: BorderRadius.circular(12),
-                    onPressed: () {
-                      // 로딩 중이면 중복 클릭 방지
-                      if (isLoading) return;
-                      
-                      // 구독 상태에 따라 다른 메서드 호출
-                      if (isSubscribed) {
-                        ref.read(hashtagChannelControllerProvider.notifier)
-                           .unsubscribeFromChannel(userId, channel.id);
-                      } else {
-                        ref.read(hashtagChannelControllerProvider.notifier)
-                           .subscribeToChannel(userId, channel.id);
-                      }
-                    },
-                    child: isLoading 
-                      ? const CupertinoActivityIndicator(radius: 10)
-                      : Text(
-                          isSubscribed ? '구독해제' : '구독하기',
-                          style: TextStyle(
-                            color: isSubscribed ? AppColors.primaryPurple : AppColors.white,
-                            fontSize: 15, 
-                            fontWeight: FontWeight.w600
-                          ),
-                        ),
-                  ),
-                );
-              },
-              loading: () => SizedBox(
-                width: double.infinity,
-                child: CupertinoButton(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  color: AppColors.cardBackground, 
-                  disabledColor: AppColors.cardBackground,
-                  borderRadius: BorderRadius.circular(12), 
-                  onPressed: null,
-                  child: const CupertinoActivityIndicator(radius: 10),
-                ),
-              ),
-              error: (_, __) => SizedBox(
-                width: double.infinity,
-                child: CupertinoButton(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  color: AppColors.primaryPurple,
-                  borderRadius: BorderRadius.circular(12),
-                  onPressed: () {
-                    // userId는 null이 아님이 이미 보장됨
-                    ref.read(hashtagChannelControllerProvider.notifier)
-                       .subscribeToChannel(userId, channel.id);
-                  },
-                  child: const Text(
-                    '구독하기', 
-                    style: TextStyle(
-                      color: AppColors.white, 
-                      fontSize: 15, 
-                      fontWeight: FontWeight.w600
-                    )
-                  ),
-                ),
-              ),
-            ),
+          if (userId != null)
+            _buildSubscribeButton(userId, channel.id, isNavLocked)
         ],
+      ),
+    );
+  }
+  
+  Widget _buildSubscribeButton(String userId, String channelId, bool isNavLocked) {
+    // 구독 상태 조회를 위한 키
+    final subKey = '$userId:$channelId';
+    
+    // 구독 상태
+    final subscriptionState = ref.watch(channelSubscriptionProvider(subKey));
+    final channelController = ref.watch(hashtagChannelControllerProvider);
+    
+    final isLoading = subscriptionState.isLoading || channelController.isLoading || _isSubscriptionLoading;
+    
+    return subscriptionState.when(
+      data: (isSubscribed) {
+        return SizedBox(
+          width: double.infinity,
+          child: CupertinoButton(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            color: isSubscribed ? AppColors.cardBackground : AppColors.primaryPurple,
+            borderRadius: BorderRadius.circular(12),
+            onPressed: (isLoading || isNavLocked) ? null : _handleSubscription,
+            child: isLoading 
+              ? const CupertinoActivityIndicator(radius: 10)
+              : Text(
+                  isSubscribed ? '구독해제' : '구독하기',
+                  style: TextStyle(
+                    color: isSubscribed ? AppColors.primaryPurple : AppColors.white,
+                    fontSize: 15, 
+                    fontWeight: FontWeight.w600
+                  ),
+                ),
+          ),
+        );
+      },
+      loading: () => SizedBox(
+        width: double.infinity,
+        child: CupertinoButton(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          color: AppColors.cardBackground, 
+          disabledColor: AppColors.cardBackground,
+          borderRadius: BorderRadius.circular(12), 
+          onPressed: null,
+          child: const CupertinoActivityIndicator(radius: 10),
+        ),
+      ),
+      error: (_, __) => SizedBox(
+        width: double.infinity,
+        child: CupertinoButton(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          color: AppColors.primaryPurple,
+          borderRadius: BorderRadius.circular(12),
+          onPressed: isNavLocked ? null : _handleSubscription,
+          child: const Text(
+            '구독하기', 
+            style: TextStyle(
+              color: AppColors.white, 
+              fontSize: 15, 
+              fontWeight: FontWeight.w600
+            )
+          ),
+        ),
       ),
     );
   }

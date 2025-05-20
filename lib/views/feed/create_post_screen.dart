@@ -294,11 +294,11 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                                       color: AppColors.separator,
                                       width: 1.0,
                                     ),
-                                    boxShadow: [
+                                    boxShadow: const [
                                       BoxShadow(
-                                        color: Colors.black.withAlpha(40),
+                                        color: Color(0x28000000), // 40% 투명도의 검정색
                                         blurRadius: 4,
-                                        offset: const Offset(0, 2),
+                                        offset: Offset(0, 2),
                                       ),
                                     ],
                                   ),
@@ -337,11 +337,11 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                       decoration: BoxDecoration(
                         color: AppColors.cardBackground,
                         borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
+                        boxShadow: const [
                           BoxShadow(
-                            color: Colors.black.withAlpha(30),
+                            color: Color(0x1E000000), // 30% 투명도의 검정색
                             blurRadius: 8,
-                            offset: const Offset(0, 4),
+                            offset: Offset(0, 4),
                           ),
                         ],
                       ),
@@ -370,8 +370,8 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                                         },
                                         child: Container(
                                           padding: const EdgeInsets.all(8),
-                                          decoration: BoxDecoration(
-                                            color: Colors.black.withAlpha(150),
+                                          decoration: const BoxDecoration(
+                                            color: Color(0x96000000), // 150/255 투명도의 검정색
                                             shape: BoxShape.circle,
                                           ),
                                           child: const Icon(
@@ -399,9 +399,9 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                                       width: 8,
                                       height: 8,
                                       margin: const EdgeInsets.symmetric(horizontal: 3),
-                                      decoration: BoxDecoration(
+                                      decoration: const BoxDecoration(
                                         shape: BoxShape.circle,
-                                        color: Colors.white.withAlpha(180),
+                                        color: Color(0xB4FFFFFF), // 180/255 투명도의 흰색
                                       ),
                                     ),
                                   ),
@@ -412,11 +412,11 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                       ),
                     )
                   else
-                    // 이미지 없을 때 정사각형 업로드 영역 (세련된 디자인)
+                    // 이미지 없을 때 업로드 영역 - 더 작은 높이로 수정
                     GestureDetector(
                       onTap: _pickImages,
                       child: Container(
-                        height: screenWidth - 32, // 정사각형 크기
+                        height: 100, // 높이를 200으로 줄임
                         decoration: BoxDecoration(
                           color: AppColors.cardBackground,
                           borderRadius: BorderRadius.circular(16),
@@ -424,52 +424,64 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                             color: AppColors.separator,
                             width: 1.0,
                           ),
-                          boxShadow: [
+                          boxShadow: const [
                             BoxShadow(
-                              color: Colors.black.withAlpha(30),
+                              color: Color(0x1E000000), // 30% 투명도의 검정색
                               blurRadius: 8,
-                              offset: const Offset(0, 4),
+                              offset: Offset(0, 4),
                             ),
                           ],
                         ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              width: 80,
-                              height: 80,
-                              decoration: BoxDecoration(
-                                color: AppColors.darkBackground,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: AppColors.primaryPurple,
-                                  width: 2,
+                        child: Center(
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              // 아이콘 영역
+                              Container(
+                                width: 60, // 크기를 줄임
+                                height: 60, // 크기를 줄임
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF3C3C48),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: AppColors.primaryPurple,
+                                    width: 2,
+                                  ),
+                                ),
+                                child: const Center(
+                                  child: Icon(
+                                    CupertinoIcons.photo,
+                                    size: 30, // 아이콘 크기 줄임
+                                    color: AppColors.primaryPurple,
+                                  ),
                                 ),
                               ),
-                              child: const Icon(
-                                CupertinoIcons.photo,
-                                size: 40,
-                                color: AppColors.primaryPurple,
+                              const SizedBox(width: 16),
+                              // 텍스트 영역
+                              Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: const [
+                                  Text(
+                                    '사진 추가하기',
+                                    style: TextStyle(
+                                      color: AppColors.primaryPurple,
+                                      fontSize: 16, // 글자 크기 줄임
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  SizedBox(height: 4), // 간격 줄임
+                                  Text(
+                                    '탭하여 갤러리에서 선택',
+                                    style: TextStyle(
+                                      color: AppColors.textSecondary,
+                                      fontSize: 12, // 글자 크기 줄임
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                            const SizedBox(height: 16),
-                            const Text(
-                              '사진 추가하기',
-                              style: TextStyle(
-                                color: AppColors.primaryPurple,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            const Text(
-                              '탭하여 갤러리에서 선택',
-                              style: TextStyle(
-                                color: AppColors.textSecondary,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -483,19 +495,19 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                         child: Container(
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(12),
-                            gradient: LinearGradient(
+                            gradient: const LinearGradient(
                               colors: [
-                                AppColors.primaryPurple.withAlpha(200),
-                                AppColors.primaryPurple.withAlpha(100),
+                                Color(0xC8785BFF), // AppColors.primaryPurple 200/255 투명도
+                                Color(0x64785BFF), // AppColors.primaryPurple 100/255 투명도
                               ],
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             ),
-                            boxShadow: [
+                            boxShadow: const [
                               BoxShadow(
-                                color: AppColors.primaryPurple.withAlpha(40),
+                                color: Color(0x28785BFF), // AppColors.primaryPurple 40/255 투명도
                                 blurRadius: 8,
-                                offset: const Offset(0, 4),
+                                offset: Offset(0, 4),
                               ),
                             ],
                           ),
@@ -503,24 +515,24 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                             onPressed: _pickImages,
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             child: const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                CupertinoIcons.photo,
-                                color: AppColors.white,
-                                size: 20,
-                              ),
-                              SizedBox(width: 8),
-                              Text(
-                                '갤러리',
-                                style: TextStyle(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  CupertinoIcons.photo,
                                   color: AppColors.white,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
+                                  size: 20,
                                 ),
-                              ),
-                            ],
-                          ),
+                                SizedBox(width: 8),
+                                Text(
+                                  '갤러리',
+                                  style: TextStyle(
+                                    color: AppColors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -529,19 +541,19 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                         child: Container(
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(12),
-                            gradient: LinearGradient(
+                            gradient: const LinearGradient(
                               colors: [
-                                AppColors.secondaryBlue.withAlpha(200),
-                                AppColors.secondaryBlue.withAlpha(100),
+                                Color(0xC8537AF1), // AppColors.secondaryBlue 200/255 투명도
+                                Color(0x64537AF1), // AppColors.secondaryBlue 100/255 투명도
                               ],
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             ),
-                            boxShadow: [
+                            boxShadow: const [
                               BoxShadow(
-                                color: AppColors.secondaryBlue.withAlpha(40),
+                                color: Color(0x28537AF1), // AppColors.secondaryBlue 40/255 투명도
                                 blurRadius: 8,
-                                offset: const Offset(0, 4),
+                                offset: Offset(0, 4),
                               ),
                             ],
                           ),
@@ -549,24 +561,24 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                             onPressed: _takePicture,
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             child: const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                CupertinoIcons.camera,
-                                color: AppColors.white,
-                                size: 20,
-                              ),
-                              SizedBox(width: 8),
-                              Text(
-                                '카메라',
-                                style: TextStyle(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  CupertinoIcons.camera,
                                   color: AppColors.white,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
+                                  size: 20,
                                 ),
-                              ),
-                            ],
-                          ),
+                                SizedBox(width: 8),
+                                Text(
+                                  '카메라',
+                                  style: TextStyle(
+                                    color: AppColors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -581,11 +593,11 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                     decoration: BoxDecoration(
                       color: AppColors.cardBackground,
                       borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
+                      boxShadow: const [
                         BoxShadow(
-                          color: Colors.black.withAlpha(30),
+                          color: Color(0x1E000000), // 30% 투명도의 검정색
                           blurRadius: 8,
-                          offset: const Offset(0, 4),
+                          offset: Offset(0, 4),
                         ),
                       ],
                     ),
@@ -647,11 +659,11 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                     decoration: BoxDecoration(
                       color: AppColors.cardBackground,
                       borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
+                      boxShadow: const [
                         BoxShadow(
-                          color: Colors.black.withAlpha(30),
+                          color: Color(0x1E000000), // 30% 투명도의 검정색
                           blurRadius: 8,
-                          offset: const Offset(0, 4),
+                          offset: Offset(0, 4),
                         ),
                       ],
                     ),
@@ -710,11 +722,11 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                     decoration: BoxDecoration(
                       color: AppColors.cardBackground,
                       borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
+                      boxShadow: const [
                         BoxShadow(
-                          color: Colors.black.withAlpha(30),
+                          color: Color(0x1E000000), // 30% 투명도의 검정색
                           blurRadius: 8,
-                          offset: const Offset(0, 4),
+                          offset: Offset(0, 4),
                         ),
                       ],
                     ),
@@ -808,13 +820,13 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                                   vertical: 8.0,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: AppColors.primaryPurple.withAlpha(150),
+                                  color: const Color(0x96785BFF), // AppColors.primaryPurple 150/255 투명도
                                   borderRadius: BorderRadius.circular(16.0),
-                                  boxShadow: [
+                                  boxShadow: const [
                                     BoxShadow(
-                                      color: AppColors.primaryPurple.withAlpha(40),
+                                      color: Color(0x28785BFF), // AppColors.primaryPurple 40/255 투명도
                                       blurRadius: 6,
-                                      offset: const Offset(0, 2),
+                                      offset: Offset(0, 2),
                                     ),
                                   ],
                                 ),
@@ -867,10 +879,10 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                       margin: const EdgeInsets.only(bottom: 16.0),
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: CupertinoColors.systemRed.withAlpha(40),
+                        color: const Color(0x28FF3B30), // CupertinoColors.systemRed 40/255 투명도
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: CupertinoColors.systemRed.withAlpha(100),
+                          color: const Color(0x64FF3B30), // CupertinoColors.systemRed 100/255 투명도
                           width: 1.0,
                         ),
                       ),
@@ -908,11 +920,11 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
-                      boxShadow: [
+                      boxShadow: const [
                         BoxShadow(
-                          color: AppColors.primaryPurple.withAlpha(60),
+                          color: Color(0x3C785BFF), // AppColors.primaryPurple 60/255 투명도
                           blurRadius: 12,
-                          offset: const Offset(0, 6),
+                          offset: Offset(0, 6),
                         ),
                       ],
                     ),
@@ -922,9 +934,9 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                       child: Container(
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(vertical: 16),
-                        child: Row(
+                        child: const Row(
                           mainAxisAlignment: MainAxisAlignment.center,
-                          children: const [
+                          children: [
                             Icon(
                               CupertinoIcons.paperplane_fill,
                               color: AppColors.white,
@@ -953,9 +965,4 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
       ),
     );
   }
-}
-
-class Colors {
-  static const Color black = Color(0xFF000000);
-  static const Color white = Color(0xFFFFFFFF);
 }

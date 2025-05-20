@@ -5,6 +5,8 @@ import '../../../constants/app_colors.dart';
 import '../../../providers/auth_provider.dart';
 import '../feed/main_tab_screen.dart';
 import 'signup_screen.dart';
+import '../auth/terms_agreement_screen.dart';
+import '../profile/setup_profile_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -259,26 +261,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     });
   }
 
-  void _navigateToFeed() {
+  // 네비게이션 중복 방지 함수
+  void _navigateTo(Widget screen) {
     if (mounted && !_navigationInProgress) {
       setState(() {
         _navigationInProgress = true; // 네비게이션 시작 플래그 설정
       });
 
-      debugPrint('메인 탭 화면으로 이동 시도');
-
       // 다음 프레임에서 실행하도록 함
       Future.microtask(() {
         if (mounted) {
-          // async gap 이후에도 mounted 체크
-          Navigator.of(context).pushReplacement(
-            CupertinoPageRoute(
-              builder: (context) => const MainTabScreen(),
-            ),
+          Navigator.of(context).pushAndRemoveUntil(
+            CupertinoPageRoute(builder: (context) => screen),
+            (route) => false, // 모든 이전 화면 제거
           );
         }
       });
     }
+  }
+
+  void _navigateToFeed() {
+    _navigateTo(const MainTabScreen());
   }
 
   @override
@@ -324,18 +327,34 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       // 로그인 성공 처리는 authStateProvider에 의해 자동으로 이루어짐
     } catch (e) {
       if (mounted) {
-        // 비동기 갭 이후 mounted 확인
         setState(() {
           _errorMessage = '로그인에 실패했습니다: ${e.toString()}';
         });
       }
     } finally {
       if (mounted) {
-        // 비동기 갭 이후 mounted 확인
         setState(() {
           _isLoading = false;
         });
       }
+    }
+  }
+
+  // 회원가입 진행 상태에 따라 적절한 화면으로 이동
+  void _navigateBasedOnSignupProgress(String userId, SignupProgress progress) {
+    if (!mounted) return;
+
+    switch (progress) {
+      case SignupProgress.registered:
+        _navigateTo(TermsAgreementScreen(userId: userId));
+        break;
+      case SignupProgress.termsAgreed:
+        _navigateTo(SetupProfileScreen(userId: userId));
+        break;
+      case SignupProgress.completed:
+      case SignupProgress.none:
+        _navigateToFeed();
+        break;
     }
   }
 
@@ -347,23 +366,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     });
 
     try {
-      // 수정된 부분: context를 전달하여 신규 사용자 처리
-      await ref.read(authControllerProvider.notifier).signInWithGoogle(context);
+      final result =
+          await ref.read(authControllerProvider.notifier).signInWithGoogle();
 
       debugPrint("구글 로그인 성공!");
 
-      // 구글 로그인 성공 처리는 authControllerProvider 내에서 처리됨
-      // 여기서 직접 navigate는 하지 않음
+      if (result?.user != null) {
+        // 인증 상태에 따라 적절한 화면으로 이동
+        final signupProgress = ref.read(signupProgressProvider);
+        _navigateBasedOnSignupProgress(result!.user!.uid, signupProgress);
+      }
     } catch (e) {
       if (mounted) {
-        // 비동기 갭 이후 mounted 확인
         setState(() {
           _errorMessage = '구글 로그인에 실패했습니다. 다시 시도해주세요. 오류: $e';
         });
       }
     } finally {
       if (mounted) {
-        // 비동기 갭 이후 mounted 확인
         setState(() {
           _isGoogleLoading = false;
         });
@@ -383,21 +403,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       await Future.delayed(const Duration(seconds: 1)); // 임시 지연
 
       if (mounted) {
-        // 비동기 갭 이후 mounted 확인
         setState(() {
           _errorMessage = '애플 로그인이 아직 구현되지 않았습니다.';
         });
       }
     } catch (e) {
       if (mounted) {
-        // 비동기 갭 이후 mounted 확인
         setState(() {
           _errorMessage = '애플 로그인에 실패했습니다.';
         });
       }
     } finally {
       if (mounted) {
-        // 비동기 갭 이후 mounted 확인
         setState(() {
           _isAppleLoading = false;
         });
@@ -572,21 +589,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
               width: _fadingStarSizes[index],
               height: _fadingStarSizes[index],
               decoration: BoxDecoration(
-                color: _fadingStarColors[index],
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: Color.fromRGBO(
-                      _fadingStarColors[index].r.toInt(),
-                      _fadingStarColors[index].g.toInt(),
-                      _fadingStarColors[index].b.toInt(),
-                      0.5, // 투명도 (0.0 ~ 1.0)
+                  color: _fadingStarColors[index],
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      // withOpacity 대신 withValues() 메서드 사용
+                      color: _fadingStarColors[index].withValues(
+                          red: _fadingStarColors[index].r,
+                          green: _fadingStarColors[index].g,
+                          blue: _fadingStarColors[index].b,
+                          // alpha 값은 0-255 범위이므로 0.5 * 255 = 127.5 ≈ 128
+                          alpha: 128),
+                      blurRadius: _fadingStarSizes[index] * 2,
+                      spreadRadius: _fadingStarSizes[index] * 0.2,
                     ),
-                    blurRadius: _fadingStarSizes[index] * 2,
-                    spreadRadius: _fadingStarSizes[index] * 0.2,
-                  ),
-                ],
-              ),
+                  ]),
             ),
           ),
         );
