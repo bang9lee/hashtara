@@ -1,13 +1,15 @@
+// setup_profile_screen.dart - 프로필 설정 완료 처리 수정
+
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+// import 'package:cloud_firestore/cloud_firestore.dart'; // 사용하지 않음 - 제거
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
-import 'package:hashtara/constants/app_colors.dart'; // 'package:' import로 변경
-import 'package:hashtara/constants/app_strings.dart'; // 'package:' import로 변경
-import 'package:hashtara/providers/auth_provider.dart'; // 'package:' import로 변경
-import 'package:hashtara/providers/profile_provider.dart'; // 'package:' import로 변경
-import 'package:hashtara/views/feed/main_tab_screen.dart'; // 추가: MainTabScreen import
+import 'package:hashtara/constants/app_colors.dart';
+import 'package:hashtara/providers/auth_provider.dart'; // AuthController를 사용하기 위해 명시적 임포트
+import 'package:hashtara/providers/profile_provider.dart';
+import 'package:hashtara/views/feed/main_tab_screen.dart';
 
 // 프로필 설정 상태를 위한 프로바이더
 final profileSetupStateProvider = StateNotifierProvider<ProfileSetupNotifier, ProfileSetupState>((ref) {
@@ -34,7 +36,7 @@ class ProfileSetupState {
     return ProfileSetupState(
       isCompleting: isCompleting ?? this.isCompleting,
       isSkipping: isSkipping ?? this.isSkipping,
-      errorMessage: errorMessage, // 이전 값을 유지하지 않도록 수정 (null일 수 있음)
+      errorMessage: errorMessage,
     );
   }
 }
@@ -56,13 +58,11 @@ class ProfileSetupNotifier extends StateNotifier<ProfileSetupState> {
   }
 
   void completeProfileSetup() {
-    // isCompleting는 이미 true일 것이므로, 여기서는 isNavigating 플래그처럼 작동하게 함
-    // 혹은 성공 상태를 명시적으로 나타내는 새로운 상태값을 추가할 수 있음
-    state = state.copyWith(isCompleting: true, errorMessage: null); // 성공 시에도 isCompleting 유지
+    state = state.copyWith(isCompleting: true, errorMessage: null);
   }
 
   void skipProfileSetup() {
-    state = state.copyWith(isSkipping: true, errorMessage: null); // 성공 시에도 isSkipping 유지
+    state = state.copyWith(isSkipping: true, errorMessage: null);
   }
 
   void reset() {
@@ -87,13 +87,17 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
   final _usernameController = TextEditingController();
   final _bioController = TextEditingController();
   
-  // 이미지 피커 관련 변수 추가
+  // 이미지 피커 관련 변수
   File? _profileImage;
   final ImagePicker _picker = ImagePicker();
   
   bool _nameError = false;
   bool _usernameError = false;
-  bool _isSelectingImage = false; // 이미지 선택 중 상태 추가
+  bool _isSelectingImage = false;
+
+  // 최대 글자 수 제한
+  final int _maxNameLength = 13;
+  final int _maxUsernameLength = 13;
 
   @override
   void initState() {
@@ -106,7 +110,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
     }
   }
   
-  // 이미지 선택 데이터 복구 기능 추가
+  // 이미지 선택 데이터 복구
   Future<void> _retrieveLostData() async {
     final LostDataResponse response = await _picker.retrieveLostData();
     if (response.isEmpty) {
@@ -117,7 +121,6 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
         _profileImage = File(response.file!.path);
       });
     } else {
-      // 에러 처리
       debugPrint('이미지 데이터 손실 에러: ${response.exception}');
     }
   }
@@ -199,7 +202,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
 
   // 이미지 선택 옵션 표시
   void _showImageSourceActionSheet() {
-    if (_isSelectingImage) return; // 이미 선택 중이면 중단
+    if (_isSelectingImage) return;
     
     showCupertinoModalPopup(
       context: context,
@@ -235,6 +238,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
     );
   }
 
+  // 프로필 저장 메소드 - 수정된 부분
   Future<void> _saveProfile() async {
     setState(() {
       _nameError = false;
@@ -262,7 +266,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
     try {
       debugPrint('프로필 저장 시도: ${widget.userId}');
       
-      // 이미지 업로드 로직 추가
+      // 이미지 업로드
       String? profileImageUrl;
       if (_profileImage != null) {
         profileImageUrl = await ref.read(profileRepositoryProvider).uploadProfileImage(
@@ -272,18 +276,27 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
       }
       
       await ref.read(authRepositoryProvider).createUserDocument(
-            widget.userId,
-            _nameController.text.trim(),
-            _usernameController.text.trim(),
-            profileImageUrl, // 프로필 이미지 URL 전달
-          );
+          widget.userId,
+          _nameController.text.trim(),
+          _usernameController.text.trim(),
+          profileImageUrl,
+        );
+          
+      // 프로필 문서 생성 (소개 정보만 포함)
       await ref.read(profileRepositoryProvider).createProfileDocument(
-            widget.userId,
-            _bioController.text.trim(),
-          );
-      await FirebaseFirestore.instance.collection('users').doc(widget.userId).update({
-        'profileComplete': true,
-      });
+          widget.userId,
+          _bioController.text.trim(),
+        );
+          
+      // 프로필 정보 업데이트 (기본 정보만 포함)
+      await ref.read(profileControllerProvider.notifier).updateProfile(
+        userId: widget.userId,
+        bio: _bioController.text.trim(),
+      );
+      
+      // 프로필 완료 상태 업데이트 - AuthController를 통해 처리 (수정)
+      await ref.read(authControllerProvider.notifier).completeProfileSetup(widget.userId);
+      
       debugPrint('프로필 저장 성공, 피드로 이동');
       ref.read(profileSetupStateProvider.notifier).completeProfileSetup();
     } catch (e) {
@@ -315,6 +328,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
     );
   }
 
+  // 프로필 설정 건너뛰기
   Future<void> _skipProfile() async {
     ref.read(profileSetupStateProvider.notifier).startSkipping();
     try {
@@ -323,7 +337,10 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
       final defaultUsername = 'user_$timestamp';
       await ref.read(authRepositoryProvider).createUserDocument(widget.userId, 'User', defaultUsername, null);
       await ref.read(profileRepositoryProvider).createProfileDocument(widget.userId, '프로필이 아직 설정되지 않았습니다.');
-      await FirebaseFirestore.instance.collection('users').doc(widget.userId).update({'profileComplete': true});
+      
+      // 프로필 완료 상태 업데이트 - AuthController를 통해 처리 (수정)
+      await ref.read(authControllerProvider.notifier).completeProfileSetup(widget.userId);
+      
       debugPrint('기본 프로필 생성 성공, 피드로 이동');
       ref.read(profileSetupStateProvider.notifier).skipProfileSetup();
     } catch (e) {
@@ -334,201 +351,421 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final screenSize = mediaQuery.size;
-    final horizontalPadding = screenSize.width * 0.06;
-    final buttonHeight = screenSize.height * 0.06;
-    final verticalSpacing = screenSize.height * 0.02;
-    final circleSize = screenSize.width * 0.25;
+    const buttonHeight = 52.0;
+    const circleSize = 120.0;
 
     final profileSetupState = ref.watch(profileSetupStateProvider);
 
-    // 상태 변경 감지 및 화면 전환 (성공 시에만)
+    // 상태 변경 감지 및 화면 전환
     ref.listen<ProfileSetupState>(profileSetupStateProvider, (previous, next) {
       if (mounted && (next.isCompleting || next.isSkipping) && next.errorMessage == null) {
-        // isCompleting 또는 isSkipping이 true이고, 에러가 없을 때만 네비게이션
-        // 네비게이션 후 상태 리셋은 한번만 호출되도록 보장
         WidgetsBinding.instance.addPostFrameCallback((_) {
            if (mounted && (ref.read(profileSetupStateProvider).isCompleting || ref.read(profileSetupStateProvider).isSkipping) && ref.read(profileSetupStateProvider).errorMessage == null) {
             Navigator.of(context).pushAndRemoveUntil(
-              CupertinoPageRoute(builder: (context) => const MainTabScreen()), // MainTabScreen() 호출
+              CupertinoPageRoute(builder: (context) => const MainTabScreen()),
               (route) => false,
             );
-            ref.read(profileSetupStateProvider.notifier).reset(); // 네비게이션 후 상태 리셋
+            ref.read(profileSetupStateProvider.notifier).reset();
           }
         });
       }
     });
 
-
     return PopScope(
       canPop: false,
       child: CupertinoPageScaffold(
         backgroundColor: AppColors.darkBackground,
-        navigationBar: const CupertinoNavigationBar(
-          backgroundColor: AppColors.primaryPurple,
-          middle: Text(AppStrings.setupProfile, style: TextStyle(color: AppColors.white, fontWeight: FontWeight.bold)),
+        navigationBar: CupertinoNavigationBar(
+          backgroundColor: Colors.transparent, // 투명 배경
+          border: Border.all(color: Colors.transparent), // 테두리 제거
+          middle: const Text(
+            '프로필 설정',
+            style: TextStyle(
+              color: AppColors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 18,
+            ),
+          ),
           automaticallyImplyLeading: false,
         ),
         child: SafeArea(
           child: SingleChildScrollView(
-            padding: EdgeInsets.all(horizontalPadding),
+            padding: const EdgeInsets.symmetric(horizontal: 24.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(height: verticalSpacing),
-                const Text(AppStrings.profileSetupDesc, style: TextStyle(color: AppColors.textEmphasis, fontSize: 16.0), textAlign: TextAlign.center),
-                SizedBox(height: verticalSpacing * 2),
+                const SizedBox(height: 30),
                 
-                // 프로필 이미지 선택 영역 - 탭 동작 개선
+                // 프로필 이미지 선택 영역
                 Center(
-                  child: GestureDetector(
-                    onTap: _isSelectingImage ? null : _showImageSourceActionSheet,
-                    child: Stack(
-                      children: [
-                        Container(
-                          width: circleSize, 
-                          height: circleSize,
-                          decoration: BoxDecoration(
-                            color: AppColors.cardBackground, 
-                            shape: BoxShape.circle, 
-                            border: Border.all(color: AppColors.separator, width: 2.0)
-                          ),
-                          child: _profileImage != null
-                              ? ClipRRect(
-                                  borderRadius: BorderRadius.circular(circleSize / 2),
-                                  child: Image.file(
-                                    _profileImage!,
-                                    width: circleSize,
-                                    height: circleSize,
-                                    fit: BoxFit.cover,
-                                  ),
-                                )
-                              : _isSelectingImage 
-                                  ? const CupertinoActivityIndicator()
-                                  : const Icon(
-                                      CupertinoIcons.person_fill, 
-                                      size: 60, 
-                                      color: AppColors.textEmphasis
+                  child: Column(
+                    children: [
+                      GestureDetector(
+                        onTap: _isSelectingImage ? null : _showImageSourceActionSheet,
+                        child: Stack(
+                          children: [
+                            Container(
+                              width: circleSize,
+                              height: circleSize,
+                              decoration: BoxDecoration(
+                                color: AppColors.cardBackground,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: AppColors.separator, width: 2.0),
+                              ),
+                              child: _profileImage != null
+                                ? ClipRRect(
+                                    borderRadius: BorderRadius.circular(circleSize / 2),
+                                    child: Image.file(
+                                      _profileImage!,
+                                      width: circleSize,
+                                      height: circleSize,
+                                      fit: BoxFit.cover,
                                     ),
+                                  )
+                                : _isSelectingImage
+                                  ? const CupertinoActivityIndicator()
+                                  : Center(
+                                      child: Image.asset(
+                                        'assets/images/hashtag_logo.png', // 앱 로고 이미지
+                                        width: 60,
+                                        height: 60,
+                                      ),
+                                    ),
+                            ),
+                            Positioned(
+                              right: 5,
+                              bottom: 5,
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: const BoxDecoration(
+                                  color: AppColors.primaryPurple,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  CupertinoIcons.camera_fill,
+                                  size: 20,
+                                  color: CupertinoColors.white,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                        // 카메라 아이콘 오버레이
-                        Positioned(
-                          right: 0,
-                          bottom: 0,
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: const BoxDecoration(
-                              color: AppColors.primaryPurple,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              CupertinoIcons.camera_fill,
-                              size: 20,
-                              color: CupertinoColors.white,
-                            ),
+                      ),
+                      const SizedBox(height: 14),
+                      CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        onPressed: _isSelectingImage ? null : _showImageSourceActionSheet,
+                        child: Text(
+                          '이미지 선택하기',
+                          style: TextStyle(
+                            color: _isSelectingImage
+                              ? AppColors.textSecondary
+                              : AppColors.primaryPurple,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                const SizedBox(height: 40),
+                
+                // 이름 입력
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text(
+                          '이름',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.white,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '(필수)',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: _nameError 
+                              ? CupertinoColors.systemRed 
+                              : AppColors.textSecondary,
                           ),
                         ),
                       ],
                     ),
+                    const SizedBox(height: 10),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.cardBackground,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _nameError 
+                            ? CupertinoColors.systemRed 
+                            : AppColors.separator,
+                        ),
+                      ),
+                      child: CupertinoTextField(
+                        controller: _nameController,
+                        placeholder: '이름을 입력하세요',
+                        maxLength: _maxNameLength,
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 16,
+                          horizontal: 16,
+                        ),
+                        decoration: const BoxDecoration(
+                          color: Colors.transparent,
+                        ),
+                        style: const TextStyle(
+                          color: AppColors.white,
+                          fontSize: 16,
+                        ),
+                        placeholderStyle: const TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 16,
+                        ),
+                        enabled: !profileSetupState.isCompleting && !profileSetupState.isSkipping,
+                        onChanged: (value) {
+                          if (_nameError && value.isNotEmpty) {
+                            setState(() => _nameError = false);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                
+                const SizedBox(height: 24),
+                
+                // 사용자명 입력
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text(
+                          '사용자명',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.white,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '(필수)',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: _usernameError 
+                              ? CupertinoColors.systemRed 
+                              : AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.cardBackground,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _usernameError 
+                            ? CupertinoColors.systemRed 
+                            : AppColors.separator,
+                        ),
+                      ),
+                      child: CupertinoTextField(
+                        controller: _usernameController,
+                        placeholder: '사용자명을 입력하세요 (예: user123)',
+                        maxLength: _maxUsernameLength,
+                        prefix: const Padding(
+                          padding: EdgeInsets.only(left: 16),
+                          child: Text(
+                            '@',
+                            style: TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 16,
+                          horizontal: 16,
+                        ),
+                        decoration: const BoxDecoration(
+                          color: Colors.transparent,
+                        ),
+                        style: const TextStyle(
+                          color: AppColors.white,
+                          fontSize: 16,
+                        ),
+                        placeholderStyle: const TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 16,
+                        ),
+                        enabled: !profileSetupState.isCompleting && !profileSetupState.isSkipping,
+                        onChanged: (value) {
+                          if (_usernameError && value.isNotEmpty) {
+                            setState(() => _usernameError = false);
+                          }
+                        },
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0, left: 4.0),
+                      child: Text(
+                        '영문, 숫자, 언더스코어(_)만 사용 가능합니다.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: _usernameError 
+                            ? CupertinoColors.systemRed 
+                            : AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                
+                const SizedBox(height: 24),
+                
+                // 소개 입력
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '소개 (선택)',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.cardBackground,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.separator),
+                      ),
+                      child: CupertinoTextField(
+                        controller: _bioController,
+                        placeholder: '자신을 소개해보세요',
+                        maxLines: 3,
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 16,
+                          horizontal: 16,
+                        ),
+                        decoration: const BoxDecoration(
+                          color: Colors.transparent,
+                        ),
+                        style: const TextStyle(
+                          color: AppColors.white,
+                          fontSize: 16,
+                        ),
+                        placeholderStyle: const TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 16,
+                        ),
+                        textAlign: TextAlign.left,
+                        expands: false,
+                        minLines: 1,
+                        enabled: !profileSetupState.isCompleting && !profileSetupState.isSkipping,
+                      ),
+                    ),
+                  ],
+                ),
+                
+                const SizedBox(height: 48),
+                
+                // 프로필 저장 버튼
+                Container(
+                  height: buttonHeight,
+                  decoration: BoxDecoration(
+                    gradient: (profileSetupState.isCompleting || profileSetupState.isSkipping)
+                      ? null
+                      : AppColors.primaryGradient,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    onPressed: (profileSetupState.isCompleting || profileSetupState.isSkipping)
+                      ? null
+                      : _saveProfile,
+                    child: (profileSetupState.isCompleting)
+                      ? const CupertinoActivityIndicator(color: AppColors.white)
+                      : const Text(
+                          '프로필 저장',
+                          style: TextStyle(
+                            color: AppColors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                   ),
                 ),
                 
-                SizedBox(height: verticalSpacing),
-                // 이미지 선택 버튼 - 명시적으로 추가
-                Center(
-                  child: CupertinoButton(
-                    padding: EdgeInsets.zero,
-                    onPressed: _isSelectingImage ? null : _showImageSourceActionSheet,
-                    child: Text(
-                      _profileImage != null ? '이미지 변경하기' : '이미지 선택하기',
-                      style: TextStyle(
-                        color: _isSelectingImage ? AppColors.textSecondary : AppColors.primaryPurple,
+                const SizedBox(height: 16),
+                
+                // 건너뛰기 버튼
+                if (!profileSetupState.isCompleting && !profileSetupState.isSkipping)
+                  Center(
+                    child: CupertinoButton(
+                      padding: EdgeInsets.zero,
+                      onPressed: _showSkipConfirmationDialog,
+                      child: const Text(
+                        '건너뛰기',
+                        style: TextStyle(
+                          color: AppColors.textEmphasis,
+                          fontSize: 16,
+                        ),
                       ),
                     ),
                   ),
-                ),
                 
-                SizedBox(height: verticalSpacing * 1.5),
-                Row(
-                  children: [
-                    const Text('이름', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: AppColors.textEmphasis)),
-                    const SizedBox(width: 5),
-                    Text('(필수)', style: TextStyle(fontSize: 13, color: _nameError ? CupertinoColors.systemRed : AppColors.textSecondary)),
-                  ],
-                ),
-                SizedBox(height: verticalSpacing / 2),
-                CupertinoTextField(
-                  controller: _nameController, placeholder: '이름을 입력하세요',
-                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                  decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12), border: Border.all(color: _nameError ? CupertinoColors.systemRed : AppColors.separator)),
-                  style: const TextStyle(color: AppColors.white), placeholderStyle: const TextStyle(color: AppColors.textSecondary),
-                  enabled: !profileSetupState.isCompleting && !profileSetupState.isSkipping,
-                  onChanged: (value) { if (_nameError && value.isNotEmpty) setState(() => _nameError = false); },
-                ),
-                SizedBox(height: verticalSpacing),
-                Row(
-                  children: [
-                    const Text('사용자명', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: AppColors.textEmphasis)),
-                    const SizedBox(width: 5),
-                    Text('(필수)', style: TextStyle(fontSize: 13, color: _usernameError ? CupertinoColors.systemRed : AppColors.textSecondary)),
-                  ],
-                ),
-                SizedBox(height: verticalSpacing / 2),
-                CupertinoTextField(
-                  controller: _usernameController, placeholder: '사용자명을 입력하세요 (예: user123)',
-                  prefix: const Padding(padding: EdgeInsets.only(left: 16), child: Text('@', style: TextStyle(color: AppColors.textSecondary, fontSize: 16))),
-                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                  decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12), border: Border.all(color: _usernameError ? CupertinoColors.systemRed : AppColors.separator)),
-                  style: const TextStyle(color: AppColors.white), placeholderStyle: const TextStyle(color: AppColors.textSecondary),
-                  enabled: !profileSetupState.isCompleting && !profileSetupState.isSkipping,
-                  onChanged: (value) { if (_usernameError && value.isNotEmpty) setState(() => _usernameError = false); },
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 8.0, left: 4.0),
-                  child: Text('영문, 숫자, 언더스코어(_)만 사용 가능합니다.', style: TextStyle(fontSize: 12, color: _usernameError ? CupertinoColors.systemRed : AppColors.textSecondary)),
-                ),
-                SizedBox(height: verticalSpacing),
-                const Text('소개 (선택)', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: AppColors.textEmphasis)),
-                SizedBox(height: verticalSpacing / 2),
-                CupertinoTextField(
-                  controller: _bioController, placeholder: '자신을 소개해보세요', maxLines: 3,
-                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                  decoration: BoxDecoration(color: AppColors.cardBackground, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.separator)),
-                  style: const TextStyle(color: AppColors.white), placeholderStyle: const TextStyle(color: AppColors.textSecondary),
-                  enabled: !profileSetupState.isCompleting && !profileSetupState.isSkipping,
-                ),
-                SizedBox(height: verticalSpacing * 2),
-                SizedBox(
-                  height: buttonHeight,
-                  child: CupertinoButton(
-                    padding: EdgeInsets.zero, color: AppColors.primaryPurple, borderRadius: BorderRadius.circular(12),
-                    onPressed: (profileSetupState.isCompleting || profileSetupState.isSkipping) ? null : _saveProfile,
-                    child: (profileSetupState.isCompleting) ? const CupertinoActivityIndicator(color: AppColors.white) : const Text(AppStrings.saveProfile, style: TextStyle(color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w600)),
-                  ),
-                ),
-                SizedBox(height: verticalSpacing),
-                if (!profileSetupState.isCompleting && !profileSetupState.isSkipping)
-                  Center(child: CupertinoButton(onPressed: _showSkipConfirmationDialog, child: const Text(AppStrings.skip, style: TextStyle(color: AppColors.textEmphasis, fontSize: 15)))),
-                if (profileSetupState.isSkipping && profileSetupState.errorMessage == null) // 에러가 없을 때만 로딩 표시
+                // 건너뛰기 로딩 상태 표시
+                if (profileSetupState.isSkipping && profileSetupState.errorMessage == null)
                   const Center(
                     child: Column(
                       children: [
-                        CupertinoActivityIndicator(), SizedBox(height: 8),
-                        Text('기본 프로필 설정 중...', style: TextStyle(color: AppColors.textEmphasis, fontSize: 14)),
+                        CupertinoActivityIndicator(),
+                        SizedBox(height: 8),
+                        Text(
+                          '기본 프로필 설정 중...',
+                          style: TextStyle(
+                            color: AppColors.textEmphasis,
+                            fontSize: 14,
+                          ),
+                        ),
                       ],
                     ),
                   ),
+                
+                // 에러 메시지 표시
                 if (profileSetupState.errorMessage != null)
                   Padding(
-                    padding: EdgeInsets.only(top: verticalSpacing),
+                    padding: const EdgeInsets.only(top: 24),
                     child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: CupertinoColors.systemRed.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                      child: Text(profileSetupState.errorMessage!, style: const TextStyle(color: CupertinoColors.systemRed, fontSize: 14), textAlign: TextAlign.center),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: CupertinoColors.systemRed.withAlpha(30),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        profileSetupState.errorMessage!,
+                        style: const TextStyle(
+                          color: CupertinoColors.systemRed,
+                          fontSize: 14,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   ),
-                SizedBox(height: verticalSpacing),
+                
+                const SizedBox(height: 24),
               ],
             ),
           ),

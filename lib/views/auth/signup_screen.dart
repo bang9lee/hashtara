@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../constants/app_colors.dart';
 import '../../../constants/app_strings.dart';
 import '../../../providers/auth_provider.dart';
-import '../profile/setup_profile_screen.dart';
+import '../auth/terms_agreement_screen.dart'; // 약관 동의 화면 임포트 추가
 
 class SignupScreen extends ConsumerStatefulWidget {
   const SignupScreen({Key? key}) : super(key: key);
@@ -82,19 +82,22 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         _passwordController.text,
       );
       
-      // 회원가입 성공 시 즉시 프로필 설정 화면으로 이동
+      // 회원가입 성공 시 약관 동의 화면으로 이동 (수정된 부분)
       if (user != null && mounted) {
         // 네비게이션 중복 방지 플래그 설정
         setState(() {
           _navigationInProgress = true;
         });
         
-        debugPrint('회원가입 성공, 프로필 설정 화면으로 즉시 이동: ${user.uid}');
+        debugPrint('회원가입 성공, 약관 동의 화면으로 즉시 이동: ${user.uid}');
         
-        // 화면 스택을 완전히 지우고 프로필 설정 화면으로 강제 이동
+        // 회원가입 상태 설정 (중요!)
+        ref.read(signupProgressProvider.notifier).state = SignupProgress.registered;
+        
+        // 화면 스택을 완전히 지우고 약관 동의 화면으로 강제 이동
         Navigator.of(context).pushAndRemoveUntil(
           CupertinoPageRoute(
-            builder: (context) => SetupProfileScreen(
+            builder: (context) => TermsAgreementScreen(
               userId: user.uid,
             ),
           ),
@@ -310,7 +313,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: CupertinoColors.systemRed.withOpacity(0.1),
+                      color: CupertinoColors.systemRed.withAlpha(30),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(

@@ -11,6 +11,7 @@ import '../widgets/post_card.dart';
 import 'hashtag_explore_screen.dart';
 import 'create_post_screen.dart';
 import 'hashtag_channel_detail_screen.dart';
+import 'subscribed_channels_screen.dart'; // 추가된 화면 import
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -41,18 +42,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
   Future<void> _onRefresh() async {
     try {
       // 인기 채널 새로고침
-      final refreshPopular = ref.refresh(popularHashtagChannelsProvider);
-      debugPrint('인기 채널 새로고침: ${refreshPopular.hashCode}');
+      ref.invalidate(popularHashtagChannelsProvider);
+      debugPrint('인기 채널 새로고침 요청됨');
       
       // 피드 게시물 새로고침
-      final refreshFeed = ref.refresh(feedPostsProvider);
-      debugPrint('피드 새로고침: ${refreshFeed.hashCode}');
+      ref.invalidate(feedPostsProvider);
+      debugPrint('피드 새로고침 요청됨');
       
       // 로그인 된 경우 구독 채널도 새로고침
-      final user = ref.read(currentUserProvider).value;
+      final user = ref.read(currentUserProvider).valueOrNull;
       if (user != null) {
-        final refreshChannels = ref.refresh(userSubscribedChannelsProvider(user.id));
-        debugPrint('사용자 채널 새로고침: ${refreshChannels.hashCode}');
+        ref.invalidate(userSubscribedChannelsProvider(user.id));
+        debugPrint('사용자 채널 새로고침 요청됨: ${user.id}');
       }
       
       // 딜레이 추가 (실제 API 요청 느낌 주기)
@@ -208,11 +209,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
                         CupertinoButton(
                           padding: EdgeInsets.zero,
                           onPressed: () {
+                            // 수정된 부분: 내 구독 채널 화면으로 이동
                             Navigator.of(context).push(
                               CupertinoPageRoute(
-                                builder: (context) => const HashtagExploreScreen(),
+                                builder: (context) => const SubscribedChannelsScreen(),
                               ),
-                            );
+                            ).then((_) {
+                              // 화면 복귀 시 데이터 새로고침
+                              final user = ref.read(currentUserProvider).valueOrNull;
+                              if (user != null) {
+                                ref.invalidate(userSubscribedChannelsProvider(user.id));
+                              }
+                            });
                           },
                           child: const Text(
                             '더보기',
@@ -254,7 +262,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
                             CupertinoPageRoute(
                               builder: (context) => const HashtagExploreScreen(),
                             ),
-                          );
+                          ).then((_) {
+                            // 화면 복귀 시 데이터 새로고침
+                            ref.invalidate(popularHashtagChannelsProvider);
+                          });
                         },
                         child: const Text(
                           '더보기',

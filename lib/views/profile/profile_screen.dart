@@ -425,6 +425,27 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
   
+  // 팔로워 수 표시 위젯
+  Widget _buildFollowersText(int count) {
+    return Row(
+      children: [
+        const Icon(
+          CupertinoIcons.person_2_fill,
+          color: AppColors.textSecondary,
+          size: 16,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          '팔로워 $count명',
+          style: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 14,
+          ),
+        ),
+      ],
+    );
+  }
+  
   @override
   Widget build(BuildContext context) {
     final userAsync = ref.watch(getProfileProvider(widget.userId));
@@ -485,8 +506,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // 프로필 정보
+                        // 프로필 정보 - 프로필 사진과 사용자 정보 가로 배치
                         Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             // 프로필 이미지
                             userAsync.when(
@@ -509,44 +531,50 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 24),
+                            const SizedBox(width: 16),
                             
-                            // 게시물, 팔로워 카운트 (팔로잉 제거됨 - Thread 스타일)
+                            // 사용자 정보 (계정명, 닉네임)
                             Expanded(
-                              child: profileAsync.when(
-                                data: (profile) => Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                                  children: [
-                                    _buildCountColumn('게시물', profile?.postCount ?? 0),
-                                    _buildCountColumn('팔로워', profile?.followersCount ?? 0),
-                                    // 팔로잉 제거됨
-                                  ],
-                                ),
-                                loading: () => const CupertinoActivityIndicator(),
-                                error: (_, __) => const Text('프로필을 불러올 수 없습니다.'),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // 닉네임 (이름) - 먼저 표시
+                                  userAsync.when(
+                                    data: (user) => Text(
+                                      user?.name ?? '',
+                                      style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    loading: () => const SizedBox(),
+                                    error: (_, __) => const SizedBox(),
+                                  ),
+                                  
+                                  // 계정명 (username) - 그 다음에 표시
+                                  userAsync.when(
+                                    data: (user) => Text(
+                                      '@${user?.username ?? ''}',
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                    ),
+                                    loading: () => const SizedBox(),
+                                    error: (_, __) => const SizedBox(),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 16),
                         
-                        // 사용자 이름
-                        userAsync.when(
-                          data: (user) => Text(
-                            user?.name ?? '',
-                            style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          loading: () => const SizedBox(),
-                          error: (_, __) => const SizedBox(),
-                        ),
+                        const SizedBox(height: 16),
                         
                         // 바이오 (소개)
                         _buildBioSection(profileAsync),
                         
-                        // 좋아하는 해시태그 추가 (Thread 스타일)
+                        // 좋아하는 해시태그
                         const SizedBox(height: 12),
                         profileAsync.when(
                           data: (profile) => _buildHashtags(profile?.favoriteHashtags ?? []),
@@ -554,7 +582,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           error: (_, __) => const SizedBox(),
                         ),
                         
-                        const SizedBox(height: 16),
+                        // 팔로워 수 표시 (해시태그 아래)
+                        const SizedBox(height: 12),
+                        profileAsync.when(
+                          data: (profile) => _buildFollowersText(profile?.followersCount ?? 0),
+                          loading: () => const SizedBox(),
+                          error: (_, __) => const SizedBox(),
+                        ),
+                        
+                        const SizedBox(height: 20),
                         
                         // 프로필 액션 버튼 (색상 변경)
                         if (isCurrentUser)
@@ -628,6 +664,33 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   ),
                 ),
                 
+                // 게시물 구분선
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16.0),
+                    child: SizedBox(
+                      height: 1,
+                      child: ColoredBox(
+                        color: AppColors.separator,
+                      ),
+                    ),
+                  ),
+                ),
+                
+                // 게시물 목록 헤더
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                    child: Text(
+                      '게시물',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                
                 // 게시물 목록
                 postsAsync.when(
                   data: (posts) {
@@ -696,28 +759,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       },
       loading: () => const SizedBox(),
       error: (_, __) => const SizedBox(),
-    );
-  }
-  
-  Widget _buildCountColumn(String label, int count) {
-    return Column(
-      children: [
-        Text(
-          count.toString(),
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 14,
-            color: AppColors.textEmphasis,
-          ),
-        ),
-      ],
     );
   }
 }

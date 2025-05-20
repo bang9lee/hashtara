@@ -1,3 +1,5 @@
+// 7. edit_profile_screen.dart에 회원탈퇴 기능 추가
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:io';
@@ -321,6 +323,79 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     );
   }
   
+  // 회원 탈퇴 함수 추가
+  Future<void> _handleDeleteAccount() async {
+    // 회원탈퇴 전 최종 확인을 위한 다이얼로그 표시
+    final BuildContext currentContext = context;
+    
+    showCupertinoDialog(
+      context: currentContext,
+      builder: (dialogContext) => CupertinoAlertDialog(
+        title: const Text('회원 탈퇴'),
+        content: const Text(
+          '정말 회원 탈퇴를 진행하시겠습니까?\n\n'
+          '모든 데이터가 삭제되며 이 작업은 되돌릴 수 없습니다.'
+        ),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('취소'),
+            onPressed: () => Navigator.of(dialogContext).pop(),
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            onPressed: () async {
+              // 다이얼로그 닫기
+              Navigator.of(dialogContext).pop();
+              
+              // 회원탈퇴 처리 상태 설정
+              setState(() {
+                _isLoggingOut = true; // 기존 변수 재활용
+              });
+              
+              try {
+                await ref.read(authControllerProvider.notifier).deleteAccount();
+                
+                // 회원탈퇴 성공 시 로그인 화면으로 이동
+                if (mounted) {
+                  Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+                    CupertinoPageRoute(
+                      builder: (context) => const LoginScreen(),
+                    ),
+                    (route) => false, // 모든 이전 화면 제거
+                  );
+                }
+              } catch (e) {
+                // 회원탈퇴 실패 시 오류 표시
+                if (mounted) {
+                  setState(() {
+                    _isLoggingOut = false;
+                  });
+                  
+                  // 비동기 작업 이후에 새로운 BuildContext 사용
+                  if (!mounted) return;
+                  showCupertinoDialog(
+                    context: context,
+                    builder: (errorDialogContext) => CupertinoAlertDialog(
+                      title: const Text('오류'),
+                      content: Text('회원탈퇴 중 오류가 발생했습니다: $e'),
+                      actions: [
+                        CupertinoDialogAction(
+                          child: const Text('확인'),
+                          onPressed: () => Navigator.of(errorDialogContext).pop(),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('회원탈퇴'),
+          ),
+        ],
+      ),
+    );
+  }
+  
   @override
   Widget build(BuildContext context) {
     if (_isLoggingOut) {
@@ -595,6 +670,24 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                   ),
                 ),
               ),
+              
+              // 회원탈퇴 버튼 (추가)
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: CupertinoButton(
+                  padding: EdgeInsets.zero,
+                  onPressed: _handleDeleteAccount,
+                  child: const Text(
+                    '회원탈퇴',
+                    style: TextStyle(
+                      color: CupertinoColors.systemRed,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
             ],
           ),
         ),

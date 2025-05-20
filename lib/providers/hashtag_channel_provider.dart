@@ -1,5 +1,3 @@
-// hashtag_channel_provider.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/hashtag_channel_model.dart';
@@ -31,9 +29,25 @@ final popularHashtagChannelsProvider = FutureProvider<List<HashtagChannelModel>>
 
 // 사용자 구독 해시태그 채널 프로바이더
 final userSubscribedChannelsProvider = FutureProvider.family<List<HashtagChannelModel>, String>(
-  (ref, userId) {
+  (ref, userId) async {
+    debugPrint('userSubscribedChannelsProvider 호출됨: $userId');
+    
+    // 유효한 사용자 ID 확인
+    if (userId.isEmpty) {
+      debugPrint('사용자 ID가 비어있습니다. 빈 목록 반환');
+      return [];
+    }
+    
     final repository = ref.watch(hashtagChannelRepositoryProvider);
-    return repository.getUserSubscribedChannelsOnce(userId);
+    
+    try {
+      final channels = await repository.getUserSubscribedChannelsOnce(userId);
+      debugPrint('구독 채널 ${channels.length}개 로드됨: $userId');
+      return channels;
+    } catch (e) {
+      debugPrint('구독 채널 로드 오류: $e');
+      return [];
+    }
   },
   name: 'userSubscribedChannels',
 );
@@ -59,6 +73,13 @@ final channelSubscriptionProvider = FutureProvider.family<bool, String>(
     
     final userId = parts[0];
     final channelId = parts[1];
+    
+    // 파라미터 유효성 검사 추가
+    if (userId.isEmpty || channelId.isEmpty) {
+      debugPrint('구독 상태 확인 실패: 사용자 ID 또는 채널 ID가 비어있습니다.');
+      return false;
+    }
+    
     final cacheKey = _cacheKey(userId, channelId);
     
     // 1. 먼저 캐시 확인 - 로그 최소화
@@ -71,13 +92,18 @@ final channelSubscriptionProvider = FutureProvider.family<bool, String>(
     final repository = ref.watch(hashtagChannelRepositoryProvider);
     debugPrint('구독 상태 조회: $userId, $channelId');
     
-    final isSubscribed = await repository.checkSubscriptionStatus(userId, channelId);
-    
-    // 3. 결과 캐싱 (전역 캐시만 업데이트 - StateProvider 제거)
-    _subscriptionCache[cacheKey] = isSubscribed;
-    debugPrint('구독 상태 갱신: $userId, $channelId = $isSubscribed');
-    
-    return isSubscribed;
+    try {
+      final isSubscribed = await repository.checkSubscriptionStatus(userId, channelId);
+      
+      // 3. 결과 캐싱 (전역 캐시만 업데이트 - StateProvider 제거)
+      _subscriptionCache[cacheKey] = isSubscribed;
+      debugPrint('구독 상태 갱신: $userId, $channelId = $isSubscribed');
+      
+      return isSubscribed;
+    } catch (e) {
+      debugPrint('구독 상태 확인 오류: $e');
+      return false;
+    }
   },
   name: 'channelSubscription',
 );
@@ -154,9 +180,30 @@ class HashtagChannelController extends StateNotifier<AsyncValue<void>> {
 
   HashtagChannelController(this._repository, this._ref) : super(const AsyncValue.data(null));
 
-  Future<void> subscribeToChannel(String userId, String channelId) async {
-    state = const AsyncValue.loading();
+  // 트랜잭션/오류 처리 로직을 분리하는 헬퍼 메서드
+  Future<void> _executeAction(Future<void> Function() action) async {
     try {
+      state = const AsyncValue.loading();
+      await action();
+      state = const AsyncValue.data(null);
+    } catch (e, stack) {
+      debugPrint('채널 작업 오류: $e');
+      state = AsyncValue.error(e, stack);
+    }
+  }
+
+  Future<void> subscribeToChannel(String userId, String channelId) async {
+    // 먼저 인자 유효성 확인
+    if (userId.isEmpty || channelId.isEmpty) {
+      debugPrint('구독 실패: 사용자 ID 또는 채널 ID가 비어있습니다.');
+      state = AsyncValue.error(
+        Exception('구독에 필요한 정보가 부족합니다.'),
+        StackTrace.current,
+      );
+      return;
+    }
+    
+    await _executeAction(() async {
       await _repository.subscribeToChannel(userId, channelId);
       
       // 성공 후 캐시 업데이트
@@ -166,27 +213,26 @@ class HashtagChannelController extends StateNotifier<AsyncValue<void>> {
       // 구독 상태 변경 로그만 출력
       debugPrint('구독 상태 변경: $userId, $channelId = true');
       
-      // 관련 프로바이더 새로고침 - 사용하지 않는 결과값 무시
-      // ignore: unused_result
-      _ref.refresh(popularHashtagChannelsProvider);
-      // ignore: unused_result
-      _ref.refresh(userSubscribedChannelsProvider(userId));
-      // ignore: unused_result
-      _ref.refresh(hashtagChannelProvider(channelId));
-      // ignore: unused_result
-      _ref.refresh(channelSubscriptionProvider('$userId:$channelId'));
-      
-      // 로딩 완료
-      state = const AsyncValue.data(null);
-    } catch (e, stack) {
-      debugPrint('구독 오류: $e');
-      state = AsyncValue.error(e, stack);
-    }
+      // 관련 프로바이더 새로고침 - 명시적으로 각 프로바이더 새로고침
+      _ref.invalidate(popularHashtagChannelsProvider);
+      _ref.invalidate(userSubscribedChannelsProvider(userId));
+      _ref.invalidate(hashtagChannelProvider(channelId));
+      _ref.invalidate(channelSubscriptionProvider('$userId:$channelId'));
+    });
   }
 
   Future<void> unsubscribeFromChannel(String userId, String channelId) async {
-    state = const AsyncValue.loading();
-    try {
+    // 먼저 인자 유효성 확인
+    if (userId.isEmpty || channelId.isEmpty) {
+      debugPrint('구독 취소 실패: 사용자 ID 또는 채널 ID가 비어있습니다.');
+      state = AsyncValue.error(
+        Exception('구독 취소에 필요한 정보가 부족합니다.'),
+        StackTrace.current,
+      );
+      return;
+    }
+    
+    await _executeAction(() async {
       await _repository.unsubscribeFromChannel(userId, channelId);
       
       // 성공 후 캐시 업데이트
@@ -196,22 +242,12 @@ class HashtagChannelController extends StateNotifier<AsyncValue<void>> {
       // 구독 상태 변경 로그만 출력
       debugPrint('구독 상태 변경: $userId, $channelId = false');
       
-      // 관련 프로바이더 새로고침 - 사용하지 않는 결과값 무시
-      // ignore: unused_result
-      _ref.refresh(popularHashtagChannelsProvider);
-      // ignore: unused_result
-      _ref.refresh(userSubscribedChannelsProvider(userId));
-      // ignore: unused_result
-      _ref.refresh(hashtagChannelProvider(channelId));
-      // ignore: unused_result
-      _ref.refresh(channelSubscriptionProvider('$userId:$channelId'));
-      
-      // 로딩 완료
-      state = const AsyncValue.data(null);
-    } catch (e, stack) {
-      debugPrint('구독 취소 오류: $e');
-      state = AsyncValue.error(e, stack);
-    }
+      // 관련 프로바이더 새로고침
+      _ref.invalidate(popularHashtagChannelsProvider);
+      _ref.invalidate(userSubscribedChannelsProvider(userId));
+      _ref.invalidate(hashtagChannelProvider(channelId));
+      _ref.invalidate(channelSubscriptionProvider('$userId:$channelId'));
+    });
   }
 
   // 채널 생성
@@ -222,8 +258,7 @@ class HashtagChannelController extends StateNotifier<AsyncValue<void>> {
       state = const AsyncValue.data(null);
       
       // 채널 생성 후 인기 채널 목록 새로고침
-      // ignore: unused_result
-      _ref.refresh(popularHashtagChannelsProvider);
+      _ref.invalidate(popularHashtagChannelsProvider);
       
       return channelId;
     } catch (e, stack) {
@@ -234,20 +269,23 @@ class HashtagChannelController extends StateNotifier<AsyncValue<void>> {
 
   // 해시태그 채널 게시물 수 업데이트 - 개선된 버전
   Future<void> updateChannelPostsCount(String channelName) async {
+    if (channelName.isEmpty) {
+      debugPrint('채널 게시물 수 업데이트 실패: 채널 이름이 비어있습니다.');
+      return;
+    }
+    
     try {
       await _repository.updateHashtagChannelPostsCount(channelName);
       
       // 채널 목록 새로고침
-      // ignore: unused_result
-      _ref.refresh(popularHashtagChannelsProvider);
+      _ref.invalidate(popularHashtagChannelsProvider);
       
       // 가능한 경우 특정 채널 새로고침
       // 채널 ID를 모르기 때문에 이름을 통해 간접적으로 갱신
       final channels = await _repository.searchChannels(channelName);
       for (final channel in channels) {
         if (channel.name.toLowerCase() == channelName.toLowerCase()) {
-          // ignore: unused_result
-          _ref.refresh(hashtagChannelProvider(channel.id));
+          _ref.invalidate(hashtagChannelProvider(channel.id));
           break;
         }
       }

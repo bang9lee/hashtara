@@ -6,7 +6,6 @@ import '../../../constants/app_colors.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/feed_provider.dart';
 import '../../../providers/hashtag_channel_provider.dart';
-import '../common/custom_button.dart';
 import '../../../models/hashtag_channel_model.dart';
 
 class CreatePostScreen extends ConsumerStatefulWidget {
@@ -210,6 +209,7 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
   @override
   Widget build(BuildContext context) {
     final currentUser = ref.watch(currentUserProvider);
+    final screenWidth = MediaQuery.of(context).size.width;
     
     return CupertinoPageScaffold(
       backgroundColor: AppColors.darkBackground,
@@ -266,416 +266,696 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
           )
         // 게시물 작성 화면
         : SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 사용자 정보
-                currentUser.when(
-                  data: (user) => user != null
-                      ? Row(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 사용자 정보
+                  currentUser.when(
+                    data: (user) => user != null
+                        ? Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12.0),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: AppColors.cardBackground,
+                                    image: user.profileImageUrl != null
+                                        ? DecorationImage(
+                                            image: NetworkImage(user.profileImageUrl!),
+                                            fit: BoxFit.cover,
+                                          )
+                                        : null,
+                                    border: Border.all(
+                                      color: AppColors.separator,
+                                      width: 1.0,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withAlpha(40),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: user.profileImageUrl == null
+                                      ? const Icon(
+                                          CupertinoIcons.person_fill,
+                                          color: AppColors.textSecondary,
+                                          size: 20,
+                                        )
+                                      : null,
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  user.name ?? user.username ?? 'User',
+                                  style: const TextStyle(
+                                    color: AppColors.white,
+                                    fontSize: 17.0,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : const SizedBox(),
+                    loading: () => const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12.0),
+                      child: CupertinoActivityIndicator(),
+                    ),
+                    error: (_, __) => const SizedBox(),
+                  ),
+                  
+                  // 이미지 선택 영역 - 정사각형 디자인
+                  if (_selectedImages.isNotEmpty)
+                    Container(
+                      height: screenWidth - 32,  // 정사각형 크기 (화면 너비 - 좌우 패딩)
+                      decoration: BoxDecoration(
+                        color: AppColors.cardBackground,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withAlpha(30),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: Stack(
                           children: [
-                            Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: AppColors.cardBackground,
-                                image: user.profileImageUrl != null
-                                    ? DecorationImage(
-                                        image: NetworkImage(user.profileImageUrl!),
-                                        fit: BoxFit.cover,
-                                      )
-                                    : null,
-                                border: Border.all(
-                                  color: AppColors.separator,
-                                  width: 1.0,
+                            PageView.builder(
+                              itemCount: _selectedImages.length,
+                              itemBuilder: (context, index) {
+                                return Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    Image.file(
+                                      _selectedImages[index],
+                                      fit: BoxFit.cover,
+                                    ),
+                                    Positioned(
+                                      top: 12,
+                                      right: 12,
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          setState(() {
+                                            _selectedImages.removeAt(index);
+                                          });
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withAlpha(150),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            CupertinoIcons.clear,
+                                            size: 20,
+                                            color: AppColors.white,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                            if (_selectedImages.length > 1)
+                              Positioned(
+                                bottom: 12,
+                                left: 0,
+                                right: 0,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: List.generate(
+                                    _selectedImages.length,
+                                    (index) => Container(
+                                      width: 8,
+                                      height: 8,
+                                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: Colors.white.withAlpha(180),
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ),
-                              child: user.profileImageUrl == null
-                                  ? const Icon(
-                                      CupertinoIcons.person_fill,
-                                      color: AppColors.textSecondary,
-                                      size: 20,
-                                    )
-                                  : null,
+                          ],
+                        ),
+                      ),
+                    )
+                  else
+                    // 이미지 없을 때 정사각형 업로드 영역 (세련된 디자인)
+                    GestureDetector(
+                      onTap: _pickImages,
+                      child: Container(
+                        height: screenWidth - 32, // 정사각형 크기
+                        decoration: BoxDecoration(
+                          color: AppColors.cardBackground,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: AppColors.separator,
+                            width: 1.0,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withAlpha(30),
+                              blurRadius: 8,
+                              offset: const Offset(0, 4),
                             ),
-                            const SizedBox(width: 12),
-                            Text(
-                              user.name ?? user.username ?? 'User',
-                              style: const TextStyle(
+                          ],
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                color: AppColors.darkBackground,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: AppColors.primaryPurple,
+                                  width: 2,
+                                ),
+                              ),
+                              child: const Icon(
+                                CupertinoIcons.photo,
+                                size: 40,
+                                color: AppColors.primaryPurple,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            const Text(
+                              '사진 추가하기',
+                              style: TextStyle(
+                                color: AppColors.primaryPurple,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              '탭하여 갤러리에서 선택',
+                              style: TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  
+                  const SizedBox(height: 16),
+                  
+                  // 미디어 버튼들 - 세련된 디자인
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            gradient: LinearGradient(
+                              colors: [
+                                AppColors.primaryPurple.withAlpha(200),
+                                AppColors.primaryPurple.withAlpha(100),
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.primaryPurple.withAlpha(40),
+                                blurRadius: 8,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: CupertinoButton(
+                            onPressed: _pickImages,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                CupertinoIcons.photo,
                                 color: AppColors.white,
-                                fontSize: 17.0,
+                                size: 20,
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                '갤러리',
+                                style: TextStyle(
+                                  color: AppColors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            gradient: LinearGradient(
+                              colors: [
+                                AppColors.secondaryBlue.withAlpha(200),
+                                AppColors.secondaryBlue.withAlpha(100),
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.secondaryBlue.withAlpha(40),
+                                blurRadius: 8,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: CupertinoButton(
+                            onPressed: _takePicture,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                CupertinoIcons.camera,
+                                color: AppColors.white,
+                                size: 20,
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                '카메라',
+                                style: TextStyle(
+                                  color: AppColors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 24),
+                  
+                  // 캡션 입력 - 새로운 디자인
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardBackground,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withAlpha(30),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(
+                              CupertinoIcons.text_bubble,
+                              color: AppColors.primaryPurple,
+                              size: 18,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              '내용',
+                              style: TextStyle(
+                                color: AppColors.white,
+                                fontSize: 16,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
                           ],
-                        )
-                      : const SizedBox(),
-                  loading: () => const CupertinoActivityIndicator(),
-                  error: (_, __) => const SizedBox(),
-                ),
-                const SizedBox(height: 24),
-                
-                // 이미지 선택 영역
-                if (_selectedImages.isNotEmpty)
-                  Container(
-                    height: 300,
-                    decoration: BoxDecoration(
-                      color: AppColors.cardBackground,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: AppColors.separator,
-                      ),
-                    ),
-                    child: Stack(
-                      children: [
-                        PageView.builder(
-                          itemCount: _selectedImages.length,
-                          itemBuilder: (context, index) {
-                            return Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                Image.file(
-                                  _selectedImages[index],
-                                  fit: BoxFit.cover,
-                                ),
-                                Positioned(
-                                  top: 8,
-                                  right: 8,
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        _selectedImages.removeAt(index);
-                                      });
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.all(6),
-                                      decoration: BoxDecoration(
-                                        color: CupertinoColors.black.withAlpha(150),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const Icon(
-                                        CupertinoIcons.clear,
-                                        size: 18,
-                                        color: AppColors.white,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
                         ),
-                        if (_selectedImages.length > 1)
-                          Positioned(
-                            bottom: 8,
-                            left: 0,
-                            right: 0,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: List.generate(
-                                _selectedImages.length,
-                                (index) => Container(
-                                  width: 8,
-                                  height: 8,
-                                  margin: const EdgeInsets.symmetric(horizontal: 2),
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: CupertinoColors.white.withAlpha(150),
-                                  ),
-                                ),
-                              ),
-                            ),
+                        const SizedBox(height: 12),
+                        CupertinoTextField(
+                          controller: _captionController,
+                          placeholder: '무슨 생각을 하고 계신가요?',
+                          style: const TextStyle(
+                            color: AppColors.white,
+                            fontSize: 15,
                           ),
-                      ],
-                    ),
-                  )
-                else
-                  GestureDetector(
-                    onTap: _pickImages,
-                    child: Container(
-                      height: 220,
-                      decoration: BoxDecoration(
-                        color: AppColors.cardBackground,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: AppColors.separator,
-                        ),
-                      ),
-                      child: const Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            CupertinoIcons.photo_on_rectangle,
-                            size: 48,
-                            color: AppColors.textSecondary,
-                          ),
-                          SizedBox(height: 12),
-                          Text(
-                            '사진 추가하기',
-                            style: TextStyle(
-                              color: AppColors.textEmphasis,
-                              fontSize: 17,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          SizedBox(height: 6),
-                          Text(
-                            '탭하여 갤러리에서 선택',
-                            style: TextStyle(
-                              color: AppColors.textSecondary,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 16),
-                
-                // 미디어 버튼들
-                Row(
-                  children: [
-                    Expanded(
-                      child: CustomButton(
-                        text: '갤러리',
-                        onPressed: _pickImages,
-                        icon: CupertinoIcons.photo,
-                        backgroundColor: AppColors.cardBackground,
-                        textColor: AppColors.white,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: CustomButton(
-                        text: '카메라',
-                        onPressed: _takePicture,
-                        icon: CupertinoIcons.camera,
-                        backgroundColor: AppColors.cardBackground,
-                        textColor: AppColors.white,
-                      ),
-                    ),
-                  ],
-                ),
-                
-                const SizedBox(height: 24),
-                
-                // 캡션 입력
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.cardBackground,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        '내용',
-                        style: TextStyle(
-                          color: AppColors.textEmphasis,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      CupertinoTextField(
-                        controller: _captionController,
-                        placeholder: '무슨 생각을 하고 계신가요?',
-                        style: const TextStyle(color: AppColors.white),
-                        placeholderStyle: const TextStyle(
-                          color: AppColors.textSecondary,
-                        ),
-                        maxLines: 5,
-                        keyboardType: TextInputType.multiline,
-                        decoration: const BoxDecoration(
-                          color: AppColors.cardBackground,
-                          border: null,
-                        ),
-                        padding: EdgeInsets.zero,
-                      ),
-                    ],
-                  ),
-                ),
-                
-                const SizedBox(height: 16),
-                
-                // 위치 입력
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.cardBackground,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        CupertinoIcons.location,
-                        color: AppColors.textEmphasis,
-                        size: 22,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: CupertinoTextField(
-                          controller: _locationController,
-                          placeholder: '위치 추가',
-                          style: const TextStyle(color: AppColors.white),
                           placeholderStyle: const TextStyle(
                             color: AppColors.textSecondary,
+                            fontSize: 15,
                           ),
-                          decoration: const BoxDecoration(
-                            color: AppColors.cardBackground,
-                            border: null,
-                          ),
-                          padding: EdgeInsets.zero,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                
-                const SizedBox(height: 16),
-                
-                // 해시태그 입력
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.cardBackground,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        '해시태그',
-                        style: TextStyle(
-                          color: AppColors.textEmphasis,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          const Icon(
-                            CupertinoIcons.number, // hashtag 대신 number 아이콘 사용
-                            color: AppColors.textEmphasis,
-                            size: 22,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: CupertinoTextField(
-                              controller: _hashtagController,
-                              placeholder: '해시태그 추가 (예: 운동)',
-                              style: const TextStyle(color: AppColors.white),
-                              placeholderStyle: const TextStyle(
-                                color: AppColors.textSecondary,
-                              ),
-                              decoration: const BoxDecoration(
-                                color: AppColors.cardBackground,
-                                border: null,
-                              ),
-                              padding: EdgeInsets.zero,
-                              onSubmitted: (_) => _addHashtag(),
+                          maxLines: 4,
+                          minLines: 3,
+                          keyboardType: TextInputType.multiline,
+                          decoration: BoxDecoration(
+                            color: AppColors.darkBackground,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppColors.separator,
+                              width: 1.0,
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          CupertinoButton(
-                            padding: EdgeInsets.zero,
-                            onPressed: _addHashtag,
-                            child: const Icon(
-                              CupertinoIcons.add_circled,
+                          padding: const EdgeInsets.all(12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  
+                  // 위치 입력 - 새로운 디자인
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardBackground,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withAlpha(30),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(
+                              CupertinoIcons.location,
                               color: AppColors.primaryPurple,
-                              size: 28,
+                              size: 18,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              '위치',
+                              style: TextStyle(
+                                color: AppColors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        CupertinoTextField(
+                          controller: _locationController,
+                          placeholder: '위치 추가 (예: 서울특별시)',
+                          style: const TextStyle(
+                            color: AppColors.white,
+                            fontSize: 15,
+                          ),
+                          placeholderStyle: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 15,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.darkBackground,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppColors.separator,
+                              width: 1.0,
+                            ),
+                          ),
+                          padding: const EdgeInsets.all(12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  
+                  // 해시태그 입력 - 새로운 디자인
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardBackground,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withAlpha(30),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(
+                              CupertinoIcons.number,
+                              color: AppColors.primaryPurple,
+                              size: 18,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              '해시태그',
+                              style: TextStyle(
+                                color: AppColors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: CupertinoTextField(
+                                controller: _hashtagController,
+                                placeholder: '해시태그 추가 (예: 운동)',
+                                style: const TextStyle(
+                                  color: AppColors.white,
+                                  fontSize: 15,
+                                ),
+                                placeholderStyle: const TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 15,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.darkBackground,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: AppColors.separator,
+                                    width: 1.0,
+                                  ),
+                                ),
+                                prefix: const Padding(
+                                  padding: EdgeInsets.only(left: 12),
+                                  child: Text(
+                                    '#',
+                                    style: TextStyle(
+                                      color: AppColors.primaryPurple,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                padding: const EdgeInsets.all(12),
+                                onSubmitted: (_) => _addHashtag(),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            GestureDetector(
+                              onTap: _addHashtag,
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: const BoxDecoration(
+                                  color: AppColors.primaryPurple,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  CupertinoIcons.add,
+                                  color: AppColors.white,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (_selectedHashtags.isNotEmpty) ...[
+                          const SizedBox(height: 16),
+                          Wrap(
+                            spacing: 8.0,
+                            runSpacing: 12.0,
+                            children: _selectedHashtags.map((hashtag) {
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 4),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14.0,
+                                  vertical: 8.0,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primaryPurple.withAlpha(150),
+                                  borderRadius: BorderRadius.circular(16.0),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: AppColors.primaryPurple.withAlpha(40),
+                                      blurRadius: 6,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      hashtag,
+                                      style: const TextStyle(
+                                        color: AppColors.white,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    GestureDetector(
+                                      onTap: () => _removeHashtag(hashtag),
+                                      child: const Icon(
+                                        CupertinoIcons.xmark_circle_fill,
+                                        color: AppColors.white,
+                                        size: 16,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 24),
+                  
+                  // 로딩 인디케이터
+                  if (_isLoading)
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: CupertinoActivityIndicator(
+                          radius: 14,
+                        ),
+                      ),
+                    ),
+                  
+                  // 에러 메시지
+                  if (_errorMessage != null)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 16.0),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: CupertinoColors.systemRed.withAlpha(40),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: CupertinoColors.systemRed.withAlpha(100),
+                          width: 1.0,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            CupertinoIcons.exclamationmark_circle,
+                            color: CupertinoColors.systemRed,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _errorMessage!,
+                              style: const TextStyle(
+                                color: CupertinoColors.systemRed,
+                                fontSize: 14,
+                              ),
                             ),
                           ),
                         ],
                       ),
-                      if (_selectedHashtags.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8.0,
-                          runSpacing: 8.0,
-                          children: _selectedHashtags.map((hashtag) {
-                            return Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12.0,
-                                vertical: 6.0,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.primaryPurple,
-                                borderRadius: BorderRadius.circular(16.0),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    hashtag,
-                                    style: const TextStyle(
-                                      color: AppColors.white,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  GestureDetector(
-                                    onTap: () => _removeHashtag(hashtag),
-                                    child: const Icon(
-                                      CupertinoIcons.xmark_circle_fill,
-                                      color: AppColors.white,
-                                      size: 16,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }).toList(),
+                    ),
+                  
+                  // 게시 버튼 - 새로운 디자인
+                  Container(
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      gradient: const LinearGradient(
+                        colors: [
+                          AppColors.primaryPurple,
+                          AppColors.secondaryBlue,
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.primaryPurple.withAlpha(60),
+                          blurRadius: 12,
+                          offset: const Offset(0, 6),
                         ),
                       ],
-                    ],
-                  ),
-                ),
-                
-                const SizedBox(height: 24),
-                
-                // 로딩 인디케이터
-                if (_isLoading)
-                  const Center(
-                    child: CupertinoActivityIndicator(),
-                  ),
-                
-                // 에러 메시지
-                if (_errorMessage != null)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 16.0),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: CupertinoColors.systemRed.withAlpha(40),
-                      borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(
-                      _errorMessage!,
-                      style: const TextStyle(
-                        color: CupertinoColors.systemRed,
-                        fontSize: 14,
+                    child: CupertinoButton(
+                      onPressed: _isLoading ? null : _createPost,
+                      padding: EdgeInsets.zero,
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: const [
+                            Icon(
+                              CupertinoIcons.paperplane_fill,
+                              color: AppColors.white,
+                              size: 20,
+                            ),
+                            SizedBox(width: 10),
+                            Text(
+                              '게시하기',
+                              style: TextStyle(
+                                color: AppColors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      textAlign: TextAlign.center,
                     ),
                   ),
-                
-                // 게시 버튼
-                if (!_isLoading)
-                  CustomButton(
-                    text: '게시하기',
-                    onPressed: _createPost,
-                    isGradient: true,
-                    icon: CupertinoIcons.paperplane_fill,
-                  ),
-              ],
+                  
+                  const SizedBox(height: 16),
+                ],
+              ),
             ),
           ),
       ),
     );
   }
+}
+
+class Colors {
+  static const Color black = Color(0xFF000000);
+  static const Color white = Color(0xFFFFFFFF);
 }
