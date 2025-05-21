@@ -1,5 +1,3 @@
-// 7. edit_profile_screen.dart에 회원탈퇴 기능 추가
-
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:io';
@@ -9,6 +7,7 @@ import '../../../providers/auth_provider.dart';
 import '../../../providers/profile_provider.dart';
 import '../common/custom_text_field.dart';
 import '../auth/login_screen.dart';
+import '../feed/notification_settings_screen.dart';
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   final String userId;
@@ -34,7 +33,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   
   File? _profileImage;
   bool _isLoading = false;
-  bool _isLoggingOut = false;
+  bool _isProcessing = false; // 로그아웃 또는 회원탈퇴 진행 중
   String? _errorMessage;
   String? _currentProfileImageUrl;
   
@@ -247,10 +246,22 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         _errorMessage = '프로필 업데이트에 실패했습니다. 다시 시도해주세요.';
       });
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
+  }
+  
+  // 알림 설정 화면으로 이동
+  void _navigateToNotificationSettings() {
+    Navigator.push(
+      context,
+      CupertinoPageRoute(
+        builder: (context) => const NotificationSettingsScreen(),
+      ),
+    );
   }
   
   // 로그아웃 처리 함수
@@ -276,26 +287,29 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
               
               // 로그아웃 진행 상태 설정
               setState(() {
-                _isLoggingOut = true;
+                _isProcessing = true;
               });
               
               try {
                 await ref.read(authControllerProvider.notifier).signOut();
                 
-                // 로그아웃 성공 시 로그인 화면으로 이동
-                if (mounted) {
-                  Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-                    CupertinoPageRoute(
-                      builder: (context) => const LoginScreen(),
-                    ),
-                    (route) => false, // 모든 이전 화면 제거
-                  );
-                }
+                // Future.microtask를 사용하여 위젯 빌드 주기 외부에서 실행
+                Future.microtask(() {
+                  // 로그아웃 성공 시 로그인 화면으로 이동
+                  if (mounted) {
+                    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+                      CupertinoPageRoute(
+                        builder: (context) => const LoginScreen(),
+                      ),
+                      (route) => false, // 모든 이전 화면 제거
+                    );
+                  }
+                });
               } catch (e) {
                 // 로그아웃 실패 시 오류 표시
                 if (mounted) {
                   setState(() {
-                    _isLoggingOut = false;
+                    _isProcessing = false;
                   });
                   
                   // 비동기 작업 이후에 새로운 BuildContext 사용
@@ -349,26 +363,29 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
               
               // 회원탈퇴 처리 상태 설정
               setState(() {
-                _isLoggingOut = true; // 기존 변수 재활용
+                _isProcessing = true;
               });
               
               try {
                 await ref.read(authControllerProvider.notifier).deleteAccount();
                 
-                // 회원탈퇴 성공 시 로그인 화면으로 이동
-                if (mounted) {
-                  Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-                    CupertinoPageRoute(
-                      builder: (context) => const LoginScreen(),
-                    ),
-                    (route) => false, // 모든 이전 화면 제거
-                  );
-                }
+                // Future.microtask를 사용하여 위젯 빌드 주기 외부에서 실행
+                Future.microtask(() {
+                  // 회원탈퇴 성공 시 로그인 화면으로 이동
+                  if (mounted) {
+                    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+                      CupertinoPageRoute(
+                        builder: (context) => const LoginScreen(),
+                      ),
+                      (route) => false, // 모든 이전 화면 제거
+                    );
+                  }
+                });
               } catch (e) {
                 // 회원탈퇴 실패 시 오류 표시
                 if (mounted) {
                   setState(() {
-                    _isLoggingOut = false;
+                    _isProcessing = false;
                   });
                   
                   // 비동기 작업 이후에 새로운 BuildContext 사용
@@ -398,10 +415,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   
   @override
   Widget build(BuildContext context) {
-    if (_isLoggingOut) {
+    if (_isProcessing) {
       return const CupertinoPageScaffold(
         navigationBar: CupertinoNavigationBar(
-          middle: Text('로그아웃'),
+          middle: Text('처리 중...'),
         ),
         child: Center(
           child: Column(
@@ -410,7 +427,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
               CupertinoActivityIndicator(),
               SizedBox(height: 16),
               Text(
-                '로그아웃 중...',
+                '요청을 처리하는 중입니다...',
                 style: TextStyle(color: AppColors.textEmphasis),
               ),
             ],
@@ -652,8 +669,28 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                   ),
                 ),
               
+              // 알림 설정 섹션 (새로 추가)
+              const SizedBox(height: 32),
+              const _SettingHeader(title: '설정'),
+              const SizedBox(height: 12),
+              
+              // 알림 설정 버튼
+              _SettingButton(
+                icon: const Icon(
+                  CupertinoIcons.bell,
+                  size: 22,
+                  color: AppColors.primaryPurple,
+                ),
+                title: '알림 설정',
+                onTap: _navigateToNotificationSettings,
+              ),
+              
+              // 로그아웃 및 회원탈퇴 섹션
+              const SizedBox(height: 32),
+              const _SettingHeader(title: '계정'),
+              const SizedBox(height: 12),
+              
               // 로그아웃 버튼
-              const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 child: CupertinoButton(
@@ -690,6 +727,78 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
               const SizedBox(height: 24),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// 설정 헤더 위젯 (const 최적화 위한 분리)
+class _SettingHeader extends StatelessWidget {
+  final String title;
+  
+  const _SettingHeader({
+    Key? key,
+    required this.title,
+  }) : super(key: key);
+  
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title,
+      style: const TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.bold,
+        color: AppColors.textEmphasis,
+      ),
+    );
+  }
+}
+
+// 설정 버튼 위젯 (const 최적화 위한 분리)
+class _SettingButton extends StatelessWidget {
+  final Icon icon;
+  final String title;
+  final VoidCallback onTap;
+  
+  const _SettingButton({
+    Key? key,
+    required this.icon,
+    required this.title,
+    required this.onTap,
+  }) : super(key: key);
+  
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: BoxDecoration(
+          color: AppColors.cardBackground,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.separator),
+        ),
+        child: Row(
+          children: [
+            icon,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.textEmphasis,
+                ),
+              ),
+            ),
+            const Icon(
+              CupertinoIcons.chevron_right,
+              size: 18,
+              color: AppColors.textSecondary,
+            ),
+          ],
         ),
       ),
     );

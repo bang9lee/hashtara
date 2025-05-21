@@ -6,12 +6,14 @@ import '../../../constants/app_strings.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/feed_provider.dart';
 import '../../../providers/hashtag_channel_provider.dart';
+import '../../../services/notification_service.dart'; // 알림 서비스 임포트 추가
 import '../../../models/hashtag_channel_model.dart';
 import '../widgets/post_card.dart';
 import 'hashtag_explore_screen.dart';
 import 'create_post_screen.dart';
 import 'hashtag_channel_detail_screen.dart';
-import 'subscribed_channels_screen.dart'; // 추가된 화면 import
+import 'subscribed_channels_screen.dart';
+import 'notification_screen.dart'; // 알림 화면 임포트 추가
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -75,8 +77,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
     // 인기 해시태그 채널 (캐싱 적용된 상태)
     final popularChannels = ref.watch(popularHashtagChannelsProvider);
     
-    // 피드 게시물 추가
-    final feedPosts = ref.watch(feedPostsProvider);
+    // 여기가 수정된 부분: 필터링된 피드 게시물 가져오기
+    final userId = currentUser.valueOrNull?.id;
+    final feedPosts = userId != null 
+        ? ref.watch(filteredFeedPostsProvider(userId))
+        : ref.watch(feedPostsProvider);
     
     // 사용자가 구독한 해시태그 채널 (조건부 로드)
     final subscribedChannels = currentUser.maybeWhen(
@@ -85,6 +90,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
           : null,
       orElse: () => null,
     );
+    
+    // 안 읽은 알림 여부 확인
+    final hasUnreadNotifications = ref.watch(hasUnreadNotificationsProvider);
     
     return CupertinoPageScaffold(
       backgroundColor: AppColors.darkBackground,
@@ -125,11 +133,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
             CupertinoButton(
               padding: EdgeInsets.zero,
               onPressed: () {
-                // 알림 화면으로 이동
+                // 알림 화면으로 이동 (수정된 부분)
+                Navigator.of(context).push(
+                  CupertinoPageRoute(
+                    builder: (context) => const NotificationScreen(),
+                  ),
+                );
               },
-              child: const Icon(
-                CupertinoIcons.bell,
-                color: AppColors.white,
+              child: Stack(
+                children: [
+                  const Icon(
+                    CupertinoIcons.bell,
+                    color: AppColors.white,
+                  ),
+                  // 안 읽은 알림이 있는 경우 빨간 점 표시
+                  if (hasUnreadNotifications)
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: AppColors.accentRed,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ],
@@ -535,14 +566,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
     );
   }
   
-  // 해시태그 핀 위젯 (로우 형식)
+  // 해시태그 핀 위젯 (로우 형식) - 그라데이션 적용
   Widget _buildHashtagPill({required String tag, required VoidCallback onTap}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
         decoration: BoxDecoration(
-          color: AppColors.primaryPurple,
+          // 단색 대신 그라데이션 적용
+          gradient: const LinearGradient(
+            colors: [
+              Color(0xC8785BFF), // AppColors.primaryPurple 200/255 투명도
+              Color(0x64785BFF), // AppColors.primaryPurple 100/255 투명도
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
           borderRadius: BorderRadius.circular(20.0),
         ),
         child: Row(
@@ -562,7 +601,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
     );
   }
   
-  // 수평 채널 카드 위젯
+  // 수평 채널 카드 위젯 - 그라데이션 적용
   Widget _buildChannelCard(HashtagChannelModel channel) {
     return GestureDetector(
       onTap: () {
@@ -579,7 +618,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
         width: 110,
         margin: const EdgeInsets.only(right: 12.0),
         decoration: BoxDecoration(
-          color: AppColors.cardBackground,
+          // 그라데이션 배경 적용
+          gradient: const LinearGradient(
+            colors: [
+              Color(0xC8785BFF), // AppColors.primaryPurple 200/255 투명도
+              Color(0x64785BFF), // AppColors.primaryPurple 100/255 투명도
+            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
           borderRadius: BorderRadius.circular(12.0),
           border: Border.all(
             color: AppColors.separator,

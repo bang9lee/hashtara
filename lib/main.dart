@@ -1,10 +1,24 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
-import 'firebase_options.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'app.dart';
+import 'services/firebase_service.dart';
+
+// 글로벌 NavigatorKey 정의
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+// 백그라운드 메시지 핸들러 (앱이 백그라운드 상태일 때 호출)
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // 백그라운드 핸들러에서는 SharedPreferences 등 복잡한 작업 자제
+  await Firebase.initializeApp();
+  
+  // 최소한의 로그만 출력 (print 대신 debugPrint 사용)
+  debugPrint("백그라운드 메시지 수신: ${message.messageId}");
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,16 +34,12 @@ void main() async {
   );
   
   try {
-    // Firebase 초기화 전에 이미 초기화되었는지 확인
-    if (Firebase.apps.isEmpty) {
-      // Firebase 초기화 - 옵션 파일 사용
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-      logger.i("Firebase initialized successfully");
-    } else {
-      logger.i("Firebase was already initialized");
-    }
+    // Firebase Service를 통한 초기화 (App Check 포함)
+    await FirebaseService.initializeFirebase();
+    logger.i("Firebase initialized successfully with App Check");
+    
+    // FCM 백그라운드 핸들러 등록 (initializeFirebase 이후 호출)
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
     
     // 앱 상태 디버깅을 위한 설정
     FlutterError.onError = (FlutterErrorDetails details) {

@@ -8,9 +8,27 @@ import 'views/profile/setup_profile_screen.dart';
 import 'views/auth/terms_agreement_screen.dart';
 import 'views/feed/main_tab_screen.dart';
 import 'providers/auth_provider.dart';
+import 'services/notification_service.dart'; 
+
+// main.dart의 navigatorKey 가져오기
+import 'main.dart' as main_file;
 
 // 초기 라우팅 상태를 관리하는 프로바이더
 final initialRouteProvider = StateProvider<String>((ref) => 'splash');
+
+// 라우트 설정을 위한 헬퍼 클래스
+class AppRoutes {
+  static const splash = '/';
+  static const login = '/login';
+  static const termsAgreement = '/terms';
+  static const setupProfile = '/setup-profile';
+  static const main = '/main';
+  
+  // 동적 라우트
+  static String post(String id) => '/post/$id';
+  static String profile(String id) => '/profile/$id';
+  static String chat(String id) => '/chat/$id';
+}
 
 class HashtaraApp extends ConsumerStatefulWidget {
   const HashtaraApp({Key? key}) : super(key: key);
@@ -27,6 +45,13 @@ class _HashtaraAppState extends ConsumerState<HashtaraApp> {
     // 앱 시작 시 로컬 저장소에서 회원가입 진행 상태 불러오기
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadSavedSignupProgress();
+      
+      // 알림 서비스 초기화 및 대기 중인 네비게이션 처리
+      final notificationService = ref.read(notificationServiceProvider);
+      // 대기 중인 네비게이션 처리
+      Future.delayed(const Duration(seconds: 3), () {
+        notificationService.processPendingNavigation();
+      });
     });
   }
   
@@ -58,6 +83,7 @@ class _HashtaraAppState extends ConsumerState<HashtaraApp> {
     // 스플래시 화면 후 authState와 signupProgress에 따라 화면 결정
     return CupertinoApp(
       title: 'Hashtara',
+      navigatorKey: main_file.navigatorKey, // 글로벌 네비게이터 키 추가
       theme: const CupertinoThemeData(
         primaryColor: AppColors.primaryPurple,
         brightness: Brightness.dark,
@@ -82,6 +108,43 @@ class _HashtaraAppState extends ConsumerState<HashtaraApp> {
         // 네비게이션 디버깅을 위한 observer 추가
         NavigationLogger(),
       ],
+      // 명시적 라우트 정의 추가
+      onGenerateRoute: (settings) {
+        debugPrint('라우트 생성: ${settings.name}');
+        
+        // 라우트 이름 파싱
+        final uri = Uri.parse(settings.name ?? '/');
+        final pathSegments = uri.pathSegments;
+        
+        // 동적 라우트 처리
+        if (pathSegments.isNotEmpty) {
+          if (pathSegments[0] == 'post' && pathSegments.length > 1) {
+            // 게시물 상세 화면 라우트
+            final postId = pathSegments[1];
+            return CupertinoPageRoute(
+              settings: settings,
+              builder: (context) => PostDetailScreen(postId: postId),
+            );
+          } else if (pathSegments[0] == 'profile' && pathSegments.length > 1) {
+            // 프로필 화면 라우트
+            final userId = pathSegments[1];
+            return CupertinoPageRoute(
+              settings: settings,
+              builder: (context) => ProfileScreen(userId: userId),
+            );
+          } else if (pathSegments[0] == 'chat' && pathSegments.length > 1) {
+            // 채팅 상세 화면 라우트
+            final chatId = pathSegments[1];
+            return CupertinoPageRoute(
+              settings: settings,
+              builder: (context) => ChatDetailScreen(chatId: chatId),
+            );
+          }
+        }
+        
+        // 기본 라우트
+        return null;
+      },
       home: authState.when(
         data: (user) {
           if (user == null) {
@@ -184,5 +247,60 @@ class _SplashToLoginScreenState extends State<SplashToLoginScreen> {
   @override
   Widget build(BuildContext context) {
     return const SplashScreen();
+  }
+}
+
+// 임시 화면 위젯들 (실제 앱에 맞게 구현 필요)
+class PostDetailScreen extends StatelessWidget {
+  final String postId;
+  
+  const PostDetailScreen({Key? key, required this.postId}) : super(key: key);
+  
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        middle: Text('게시물 $postId'),
+      ),
+      child: Center(
+        child: Text('게시물 $postId 상세 화면'),
+      ),
+    );
+  }
+}
+
+class ProfileScreen extends StatelessWidget {
+  final String userId;
+  
+  const ProfileScreen({Key? key, required this.userId}) : super(key: key);
+  
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        middle: Text('프로필 $userId'),
+      ),
+      child: Center(
+        child: Text('사용자 $userId 프로필 화면'),
+      ),
+    );
+  }
+}
+
+class ChatDetailScreen extends StatelessWidget {
+  final String chatId;
+  
+  const ChatDetailScreen({Key? key, required this.chatId}) : super(key: key);
+  
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        middle: Text('채팅 $chatId'),
+      ),
+      child: Center(
+        child: Text('채팅 $chatId 상세 화면'),
+      ),
+    );
   }
 }

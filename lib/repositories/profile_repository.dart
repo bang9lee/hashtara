@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import '../models/profile_model.dart';
 import '../models/user_model.dart';
+import '../services/notification_handler.dart';
 
 class ProfileRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -111,37 +112,90 @@ class ProfileRepository {
     }
   }
   
-  // 프로필 이미지 업로드
+  // 프로필 이미지 업로드 - 에러 처리 및 재시도 로직 보강
   Future<String> uploadProfileImage(String userId, File imageFile) async {
     try {
       debugPrint('프로필 이미지 업로드 시도: $userId');
+      debugPrint('이미지 파일 정보: 경로=${imageFile.path}, 크기=${await imageFile.length()} 바이트');
+      
+      // Storage 참조 생성
       final ref = _storage.ref().child('profile_images').child('$userId.jpg');
       
       // 이미지 파일 메타데이터 설정
-      final uploadTask = ref.putFile(
-        imageFile,
-        SettableMetadata(
-          contentType: 'image/jpeg',
-          cacheControl: 'public, max-age=1',  // 캐시 제어 설정 추가
-        ),
+      final metadata = SettableMetadata(
+        contentType: 'image/jpeg',
+        cacheControl: 'public, max-age=3600',  // 1시간 캐싱
+        customMetadata: {
+          'userId': userId,
+          'uploadTime': DateTime.now().toIso8601String(),
+        },
       );
       
-      final snapshot = await uploadTask.whenComplete(() {});
+      // 업로드 작업 시작
+      final uploadTask = ref.putFile(imageFile, metadata);
+      
+      // 업로드 진행 상황 모니터링
+      uploadTask.snapshotEvents.listen(
+        (TaskSnapshot snapshot) {
+          final progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          debugPrint('업로드 진행률: ${progress.toStringAsFixed(1)}%');
+        },
+        onError: (e) {
+          debugPrint('업로드 상태 모니터링 오류: $e');
+        },
+      );
+      
+      // 업로드 완료 대기
+      final snapshot = await uploadTask.whenComplete(() => 
+        debugPrint('프로필 이미지 업로드 작업 완료'));
+      
+      // URL 가져오기
       final imageUrl = await snapshot.ref.getDownloadURL();
       
       debugPrint('프로필 이미지 업로드 성공: $imageUrl');
       
-      // 프로필 이미지 URL을 사용자 문서에도 업데이트
-      await _firestore.collection('users').doc(userId).update({
-        'profileImageUrl': imageUrl,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      // 재시도 최대 3회로 사용자 문서 업데이트
+      int retryCount = 0;
+      const maxRetries = 3;
       
-      debugPrint('사용자 문서 프로필 이미지 URL 업데이트 성공');
+      while (retryCount < maxRetries) {
+        try {
+          // 프로필 이미지 URL을 사용자 문서에 업데이트
+          await _firestore.collection('users').doc(userId).update({
+            'profileImageUrl': imageUrl,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+          
+          debugPrint('사용자 문서 프로필 이미지 URL 업데이트 성공');
+          return imageUrl;  // 성공 시 URL 반환
+        } catch (e) {
+          retryCount++;
+          debugPrint('사용자 문서 업데이트 실패 ($retryCount/$maxRetries): $e');
+          
+          if (retryCount < maxRetries) {
+            // 지수 백오프 대기 (0.5초, 1초, 2초...)
+            final waitTime = Duration(milliseconds: 500 * (1 << (retryCount - 1)));
+            debugPrint('${waitTime.inMilliseconds}ms 후 재시도...');
+            await Future.delayed(waitTime);
+          }
+        }
+      }
       
+      // 이미지는 업로드됐으나 문서 업데이트 실패
+      debugPrint('사용자 문서 업데이트 최대 재시도 횟수 초과');
+      debugPrint('이미지는 업로드되었으나 사용자 문서 업데이트는 실패함');
+      
+      // 이미지 URL은 반환 (부분 성공)
       return imageUrl;
     } catch (e) {
-      debugPrint('프로필 이미지 업로드 실패: $e');
+      debugPrint('프로필 이미지 업로드 중 오류 발생: $e');
+      _logger.e('프로필 이미지 업로드 실패: $e');
+      
+      // 상세 오류 정보 로깅
+      if (e is FirebaseException) {
+        debugPrint('Firebase 오류 코드: ${e.code}, 메시지: ${e.message}');
+      }
+      
       rethrow;
     }
   }
@@ -189,7 +243,7 @@ class ProfileRepository {
     }
   }
   
-  // 사용자 팔로우
+  // 사용자 팔로우 - 권한 오류를 방지하기 위해 수정됨
   Future<void> followUser(String followerId, String followingId) async {
     try {
       debugPrint('사용자 팔로우 시도: $followerId -> $followingId');
@@ -201,56 +255,78 @@ class ProfileRepository {
         return;
       }
       
-      // 트랜잭션으로 데이터 정합성 유지
-      await _firestore.runTransaction((transaction) async {
-        // 1. 사용자 프로필 문서 참조
+      // 1. 팔로잉 관계 생성 - 자신의 following 컬렉션에 추가
+      await _firestore
+          .collection('users')
+          .doc(followerId)
+          .collection('following')
+          .doc(followingId)
+          .set({
+            'userId': followingId,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+      debugPrint('팔로잉 관계 생성 성공');
+      
+      // 2. 팔로워 관계 생성 - 상대방의 followers 컬렉션에 추가
+      await _firestore
+          .collection('users')
+          .doc(followingId)
+          .collection('followers')
+          .doc(followerId)
+          .set({
+            'userId': followerId,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+      debugPrint('팔로워 관계 생성 성공');
+      
+      // 3. 팔로잉 카운트 업데이트 - 자신의 프로필 문서
+      try {
         final followerProfileRef = _firestore.collection('profiles').doc(followerId);
-        final followingProfileRef = _firestore.collection('profiles').doc(followingId);
-        
-        // 2. 프로필 문서 가져오기
-        final followerProfileDoc = await transaction.get(followerProfileRef);
-        final followingProfileDoc = await transaction.get(followingProfileRef);
-        
-        // 3. 현재 팔로잉/팔로워 수 계산
-        int currentFollowingCount = 0;
-        int currentFollowersCount = 0;
+        final followerProfileDoc = await followerProfileRef.get();
         
         if (followerProfileDoc.exists) {
-          currentFollowingCount = followerProfileDoc.data()?['followingCount'] ?? 0;
+          final currentFollowingCount = followerProfileDoc.data()?['followingCount'] ?? 0;
+          await followerProfileRef.update({'followingCount': currentFollowingCount + 1});
+          debugPrint('팔로잉 카운트 업데이트 성공');
         }
+      } catch (e) {
+        debugPrint('팔로잉 카운트 업데이트 실패 (계속 진행): $e');
+      }
+      
+      // 4. 팔로워 카운트 업데이트 - 상대방의 프로필 문서
+      try {
+        final followingProfileRef = _firestore.collection('profiles').doc(followingId);
+        final followingProfileDoc = await followingProfileRef.get();
         
         if (followingProfileDoc.exists) {
-          currentFollowersCount = followingProfileDoc.data()?['followersCount'] ?? 0;
+          final currentFollowersCount = followingProfileDoc.data()?['followersCount'] ?? 0;
+          await followingProfileRef.update({'followersCount': currentFollowersCount + 1});
+          debugPrint('팔로워 카운트 업데이트 성공');
         }
-        
-        // 4. 팔로잉 관계 생성
-        final followingRef = _firestore
-            .collection('users')
-            .doc(followerId)
-            .collection('following')
-            .doc(followingId);
-            
-        transaction.set(followingRef, {
-          'userId': followingId,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-        
-        // 5. 팔로워 관계 생성
-        final followerRef = _firestore
-            .collection('users')
-            .doc(followingId)
-            .collection('followers')
-            .doc(followerId);
-            
-        transaction.set(followerRef, {
-          'userId': followerId,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-        
-        // 6. 팔로잉/팔로워 수 업데이트
-        transaction.update(followerProfileRef, {'followingCount': currentFollowingCount + 1});
-        transaction.update(followingProfileRef, {'followersCount': currentFollowersCount + 1});
-      });
+      } catch (e) {
+        debugPrint('팔로워 카운트 업데이트 실패 (계속 진행): $e');
+      }
+      
+      // 5. 알림 생성
+      try {
+        // 팔로워 정보 가져오기
+        final followerDoc = await _firestore.collection('users').doc(followerId).get();
+        if (followerDoc.exists) {
+          final followerData = followerDoc.data();
+          final followerUsername = followerData?['username'] ?? '사용자';
+          
+          // 알림 생성
+          final notificationHandler = NotificationHandler();
+          await notificationHandler.createFollowNotification(
+            followerId: followerId,
+            followingId: followingId,
+            followerUsername: followerUsername,
+          );
+          debugPrint('팔로우 알림 생성 성공');
+        }
+      } catch (e) {
+        debugPrint('팔로우 알림 생성 실패 (계속 진행): $e');
+      }
       
       debugPrint('사용자 팔로우 성공: $followerId -> $followingId');
     } catch (e) {
@@ -259,7 +335,7 @@ class ProfileRepository {
     }
   }
   
-  // 사용자 언팔로우
+  // 사용자 언팔로우 - 권한 오류를 방지하기 위해 수정됨
   Future<void> unfollowUser(String followerId, String followingId) async {
     try {
       debugPrint('사용자 언팔로우 시도: $followerId -> $followingId');
@@ -271,55 +347,55 @@ class ProfileRepository {
         return;
       }
       
-      // 트랜잭션으로 데이터 정합성 유지
-      await _firestore.runTransaction((transaction) async {
-        // 1. 사용자 프로필 문서 참조
+      // 1. 팔로잉 관계 삭제 - 자신의 following 컬렉션에서 제거
+      await _firestore
+          .collection('users')
+          .doc(followerId)
+          .collection('following')
+          .doc(followingId)
+          .delete();
+      debugPrint('팔로잉 관계 삭제 성공');
+      
+      // 2. 팔로워 관계 삭제 - 상대방의 followers 컬렉션에서 제거
+      await _firestore
+          .collection('users')
+          .doc(followingId)
+          .collection('followers')
+          .doc(followerId)
+          .delete();
+      debugPrint('팔로워 관계 삭제 성공');
+      
+      // 3. 팔로잉 카운트 업데이트 - 자신의 프로필 문서
+      try {
         final followerProfileRef = _firestore.collection('profiles').doc(followerId);
-        final followingProfileRef = _firestore.collection('profiles').doc(followingId);
-        
-        // 2. 프로필 문서 가져오기
-        final followerProfileDoc = await transaction.get(followerProfileRef);
-        final followingProfileDoc = await transaction.get(followingProfileRef);
-        
-        // 3. 현재 팔로잉/팔로워 수 계산
-        int currentFollowingCount = 0;
-        int currentFollowersCount = 0;
+        final followerProfileDoc = await followerProfileRef.get();
         
         if (followerProfileDoc.exists) {
-          currentFollowingCount = followerProfileDoc.data()?['followingCount'] ?? 0;
+          final currentFollowingCount = followerProfileDoc.data()?['followingCount'] ?? 0;
+          // 음수가 되지 않도록 체크
+          final newCount = currentFollowingCount > 0 ? currentFollowingCount - 1 : 0;
+          await followerProfileRef.update({'followingCount': newCount});
+          debugPrint('팔로잉 카운트 업데이트 성공');
         }
+      } catch (e) {
+        debugPrint('팔로잉 카운트 업데이트 실패 (계속 진행): $e');
+      }
+      
+      // 4. 팔로워 카운트 업데이트 - 상대방의 프로필 문서
+      try {
+        final followingProfileRef = _firestore.collection('profiles').doc(followingId);
+        final followingProfileDoc = await followingProfileRef.get();
         
         if (followingProfileDoc.exists) {
-          currentFollowersCount = followingProfileDoc.data()?['followersCount'] ?? 0;
+          final currentFollowersCount = followingProfileDoc.data()?['followersCount'] ?? 0;
+          // 음수가 되지 않도록 체크
+          final newCount = currentFollowersCount > 0 ? currentFollowersCount - 1 : 0;
+          await followingProfileRef.update({'followersCount': newCount});
+          debugPrint('팔로워 카운트 업데이트 성공');
         }
-        
-        // 4. 팔로잉 관계 삭제
-        final followingRef = _firestore
-            .collection('users')
-            .doc(followerId)
-            .collection('following')
-            .doc(followingId);
-            
-        transaction.delete(followingRef);
-        
-        // 5. 팔로워 관계 삭제
-        final followerRef = _firestore
-            .collection('users')
-            .doc(followingId)
-            .collection('followers')
-            .doc(followerId);
-            
-        transaction.delete(followerRef);
-        
-        // 6. 팔로잉/팔로워 수 업데이트 (음수 방지)
-        if (currentFollowingCount > 0) {
-          transaction.update(followerProfileRef, {'followingCount': currentFollowingCount - 1});
-        }
-        
-        if (currentFollowersCount > 0) {
-          transaction.update(followingProfileRef, {'followersCount': currentFollowersCount - 1});
-        }
-      });
+      } catch (e) {
+        debugPrint('팔로워 카운트 업데이트 실패 (계속 진행): $e');
+      }
       
       debugPrint('사용자 언팔로우 성공: $followerId -> $followingId');
     } catch (e) {

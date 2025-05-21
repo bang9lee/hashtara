@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:io';
 import '../repositories/feed_repository.dart';
 import '../models/post_model.dart';
+import 'report_provider.dart';
 
 // 피드 저장소 프로바이더
 final feedRepositoryProvider = Provider<FeedRepository>((ref) {
@@ -21,6 +22,123 @@ final userPostsProvider = StreamProvider.family<List<PostModel>, String>((ref, u
   debugPrint('userPostsProvider 초기화됨: $userId');
   final repository = ref.watch(feedRepositoryProvider);
   return repository.getUserPosts(userId);
+});
+
+// 신고된 게시물을 필터링한 피드 게시물 스트림 프로바이더 
+final filteredFeedPostsProvider = Provider.family<AsyncValue<List<PostModel>>, String>((ref, userId) {
+  debugPrint('filteredFeedPostsProvider 초기화됨: $userId');
+  
+  // 원본 피드 게시물
+  final postsAsync = ref.watch(feedPostsProvider);
+  
+  // 사용자가 신고한 게시물 ID 목록
+  final reportedPostIdsAsync = ref.watch(userReportedPostIdsStreamProvider(userId));
+  
+  // 두 비동기 데이터를 결합하여 신고된 게시물을 필터링
+  if (postsAsync is AsyncData && reportedPostIdsAsync is AsyncData) {
+    final posts = postsAsync.value;
+    final reportedPostIds = reportedPostIdsAsync.value;
+    
+    // null 체크 추가
+    if (reportedPostIds != null && reportedPostIds.isNotEmpty) {
+      debugPrint('필터링된 피드 계산: 전체 게시물 ${posts?.length ?? 0}개, 신고된 게시물 ${reportedPostIds.length}개');
+    } else {
+      debugPrint('필터링된 피드 계산: 전체 게시물 ${posts?.length ?? 0}개, 신고된 게시물 없음');
+    }
+    
+    // 신고된 게시물 필터링 (null 안전하게 처리)
+    final filteredPosts = <PostModel>[];
+    
+    if (posts != null) {
+      for (final post in posts) {
+        if (reportedPostIds == null || !reportedPostIds.contains(post.id)) {
+          filteredPosts.add(post);
+        }
+      }
+    }
+    
+    debugPrint('필터링 결과: ${filteredPosts.length}개 게시물 표시');
+    return AsyncValue.data(filteredPosts);
+  } else if (postsAsync is AsyncError) {
+    final error = postsAsync.error;
+    final stackTrace = postsAsync.stackTrace ?? StackTrace.current;
+    return AsyncValue.error(error is Object ? error : Exception(error.toString()), stackTrace);
+  } else if (reportedPostIdsAsync is AsyncError) {
+    final error = reportedPostIdsAsync.error;
+    final stackTrace = reportedPostIdsAsync.stackTrace ?? StackTrace.current;
+    return AsyncValue.error(error is Object ? error : Exception(error.toString()), stackTrace);
+  } else if (postsAsync is AsyncData) {
+    // 신고 목록 로딩 중이면 원본 게시물 반환
+    final posts = postsAsync.value;
+    final safeList = <PostModel>[];
+    if (posts != null) {
+      safeList.addAll(posts);
+    }
+    return AsyncValue.data(safeList);
+  } else {
+    // 둘 다 로딩 중이면 로딩 상태 반환
+    return const AsyncValue.loading();
+  }
+});
+
+// 신고된 게시물을 필터링한 사용자 게시물 스트림 프로바이더
+final filteredUserPostsProvider = Provider.family<AsyncValue<List<PostModel>>, Map<String, String>>((ref, params) {
+  final viewerUserId = params['viewerUserId']!;  // 보고 있는 사용자 ID
+  final profileUserId = params['profileUserId']!;  // 프로필 소유자 ID
+  
+  debugPrint('filteredUserPostsProvider 초기화됨: $viewerUserId -> $profileUserId');
+  
+  // 원본 사용자 게시물
+  final postsAsync = ref.watch(userPostsProvider(profileUserId));
+  
+  // 자신의 프로필을 보는 경우 모든 게시물 표시
+  if (viewerUserId == profileUserId) {
+    debugPrint('자신의 프로필 보기: 모든 게시물 표시');
+    return postsAsync;
+  }
+  
+  // 사용자가 신고한 게시물 ID 목록
+  final reportedPostIdsAsync = ref.watch(userReportedPostIdsStreamProvider(viewerUserId));
+  
+  // 두 비동기 데이터를 결합하여 신고된 게시물을 필터링
+  if (postsAsync is AsyncData && reportedPostIdsAsync is AsyncData) {
+    final posts = postsAsync.value;
+    final reportedPostIds = reportedPostIdsAsync.value;
+    
+    // 신고된 게시물 필터링 (null 안전하게 처리)
+    final filteredPosts = <PostModel>[];
+    
+    if (posts != null) {
+      for (final post in posts) {
+        if (reportedPostIds == null || !reportedPostIds.contains(post.id)) {
+          filteredPosts.add(post);
+        }
+      }
+      
+      debugPrint('사용자 게시물 필터링 결과: ${posts.length}개 중 ${filteredPosts.length}개 표시');
+    }
+    
+    return AsyncValue.data(filteredPosts);
+  } else if (postsAsync is AsyncError) {
+    final error = postsAsync.error;
+    final stackTrace = postsAsync.stackTrace ?? StackTrace.current;
+    return AsyncValue.error(error is Object ? error : Exception(error.toString()), stackTrace);
+  } else if (reportedPostIdsAsync is AsyncError) {
+    final error = reportedPostIdsAsync.error;
+    final stackTrace = reportedPostIdsAsync.stackTrace ?? StackTrace.current;
+    return AsyncValue.error(error is Object ? error : Exception(error.toString()), stackTrace);
+  } else if (postsAsync is AsyncData) {
+    // 신고 목록 로딩 중이면 원본 게시물 반환
+    final posts = postsAsync.value;
+    final safeList = <PostModel>[];
+    if (posts != null) {
+      safeList.addAll(posts);
+    }
+    return AsyncValue.data(safeList);
+  } else {
+    // 둘 다 로딩 중이면 로딩 상태 반환
+    return const AsyncValue.loading();
+  }
 });
 
 // 좋아요 상태 프로바이더 (기존 캐싱 방식에서 스트림 방식으로 변경)
@@ -42,6 +160,41 @@ final postDetailProvider = StreamProvider.family<PostModel?, String>((ref, postI
   final repository = ref.watch(feedRepositoryProvider);
   
   return repository.getPostByIdStream(postId);
+});
+
+// 필터링된 게시물 세부 정보 프로바이더
+final filteredPostDetailProvider = Provider.family<AsyncValue<PostModel?>, Map<String, String>>((ref, params) {
+  final postId = params['postId']!;
+  final userId = params['userId']!;
+  
+  debugPrint('filteredPostDetailProvider 초기화됨: $userId -> $postId');
+  
+  // 게시물 정보
+  final postAsync = ref.watch(postDetailProvider(postId));
+  
+  // 사용자가 신고한 게시물 ID 목록
+  final hasReportedAsync = ref.watch(hasUserReportedPostProvider({'userId': userId, 'postId': postId}));
+  
+  // 두 비동기 데이터를 결합하여 신고된 게시물을 필터링
+  if (hasReportedAsync is AsyncData) {
+    final hasReported = hasReportedAsync.value;
+    
+    // 신고한 경우 null 반환
+    if (hasReported == true) {
+      debugPrint('신고된 게시물 필터링: $postId');
+      return const AsyncValue.data(null);
+    }
+    
+    // 아니면 게시물 정보 반환
+    return postAsync;
+  } else if (hasReportedAsync is AsyncError) {
+    final error = hasReportedAsync.error;
+    final stackTrace = hasReportedAsync.stackTrace ?? StackTrace.current;
+    return AsyncValue.error(error is Object ? error : Exception(error.toString()), stackTrace);
+  } else {
+    // 로딩 중이면 게시물 정보 그대로 반환
+    return postAsync;
+  }
 });
 
 // 게시물 관리 프로바이더

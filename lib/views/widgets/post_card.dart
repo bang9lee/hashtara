@@ -5,6 +5,7 @@ import '../../../constants/app_colors.dart';
 import '../../../models/post_model.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/feed_provider.dart';
+import '../../../providers/report_provider.dart';
 import '../widgets/user_avatar.dart';
 import '../../views/feed/post_detail_screen.dart';
 import '../../views/feed/edit_post_screen.dart';
@@ -31,6 +32,7 @@ class PostCard extends ConsumerStatefulWidget {
 
 class _PostCardState extends ConsumerState<PostCard> {
   bool _isDeleting = false; // 삭제 처리 중 상태 추가
+  bool _isReporting = false; // 신고 처리 중 상태 추가
 
   @override
   Widget build(BuildContext context) {
@@ -244,7 +246,7 @@ class _PostCardState extends ConsumerState<PostCard> {
                     return Text(
                       tag,
                       style: const TextStyle(
-                        color: Color.fromARGB(0, 99, 72, 255),
+                        color: AppColors.primaryPurple,
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
                       ),
@@ -610,14 +612,28 @@ class _PostCardState extends ConsumerState<PostCard> {
               ),
           ] else ...[
             // 작성자가 아닌 경우 신고 옵션 표시
-            CupertinoActionSheetAction(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-                // 신고 기능 구현 (미구현)
-                _showReportOptions();
-              },
-              child: const Text('신고하기'),
-            ),
+            if (_isReporting)
+              CupertinoActionSheetAction(
+                // 비어있는 함수를 전달 (null 대신)
+                onPressed: () {},
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CupertinoActivityIndicator(),
+                    SizedBox(width: 8),
+                    Text('신고 처리 중...'),
+                  ],
+                ),
+              )
+            else
+              CupertinoActionSheetAction(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  // 신고 기능 구현
+                  _showReportOptions();
+                },
+                child: const Text('신고하기'),
+              ),
           ],
           CupertinoActionSheetAction(
             onPressed: () {
@@ -785,24 +801,76 @@ class _PostCardState extends ConsumerState<PostCard> {
     );
   }
 
-  // 게시물 신고 처리
-  void _reportPost(String reason) {
-    // 실제 신고 처리 로직
-    debugPrint('게시물 ${widget.post.id} 신고됨: $reason');
+  // 게시물 신고 처리 - 수정된 메서드
+  Future<void> _reportPost(String reason) async {
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser == null) {
+      _showErrorDialog('로그인 필요', '신고하려면 로그인이 필요합니다.');
+      return;
+    }
+    
+    // 이미 신고 처리 중이면 무시
+    if (_isReporting) return;
 
-    // 신고 확인 다이얼로그
-    showCupertinoDialog(
-      context: context,
-      builder: (dialogContext) => CupertinoAlertDialog(
-        title: const Text('신고 완료'),
-        content: const Text('신고가 접수되었습니다. 검토 후 조치하겠습니다.'),
-        actions: [
-          CupertinoDialogAction(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('확인'),
+    // 신고 처리 중 상태로 변경
+    if (mounted) {
+      setState(() {
+        _isReporting = true;
+      });
+    }
+    
+    try {
+      debugPrint('게시물 신고 시도: ${widget.post.id}');
+      
+      // 신고 처리
+      await ref.read(reportControllerProvider.notifier).reportPost(
+        userId: currentUser.id,
+        postId: widget.post.id,
+        reason: reason,
+      );
+      
+      // 신고 확인 다이얼로그
+      if (mounted) {
+        showCupertinoDialog(
+          context: context,
+          builder: (dialogContext) => CupertinoAlertDialog(
+            title: const Text('신고 완료'),
+            content: const Text('신고가 접수되었습니다. 이 게시물은 더 이상 표시되지 않습니다.'),
+            actions: [
+              CupertinoDialogAction(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  
+                  // 필요한 경우 피드 새로고침
+                  var refreshResult1 = ref.refresh(userReportedPostIdsProvider(currentUser.id));
+                  var refreshResult2 = ref.refresh(userReportedPostIdsStreamProvider(currentUser.id));
+                  
+                  // 린트 경고 방지를 위해 변수를 사용
+                  debugPrint('신고 후 새로고침 결과: ${refreshResult1.hashCode}, ${refreshResult2.hashCode}');
+                  
+                  // 상세 화면일 경우 이전 화면으로 돌아가기
+                  if (widget.isDetailView && Navigator.canPop(context)) {
+                    Navigator.pop(context);
+                  }
+                },
+                child: const Text('확인'),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
+        );
+      }
+    } catch (e) {
+      // 오류 처리
+      if (mounted) {
+        _showErrorDialog('신고 실패', '게시물을 신고하는 중 오류가 발생했습니다: $e');
+      }
+    } finally {
+      // 신고 처리 중 상태 해제
+      if (mounted) {
+        setState(() {
+          _isReporting = false;
+        });
+      }
+    }
   }
 }

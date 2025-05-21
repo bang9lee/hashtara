@@ -21,7 +21,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   final _passwordController = TextEditingController();
   bool _isLoading = false;
   bool _isGoogleLoading = false;
-  bool _isAppleLoading = false;
   String? _errorMessage;
   bool _navigationInProgress = false; // 중복 네비게이션 방지를 위한 플래그
 
@@ -391,37 +390,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     }
   }
 
-  // 애플 로그인 (구현 필요)
-  Future<void> _handleAppleSignIn() async {
-    setState(() {
-      _isAppleLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      // 애플 로그인 구현 필요
-      await Future.delayed(const Duration(seconds: 1)); // 임시 지연
-
-      if (mounted) {
-        setState(() {
-          _errorMessage = '애플 로그인이 아직 구현되지 않았습니다.';
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = '애플 로그인에 실패했습니다.';
-        });
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isAppleLoading = false;
-        });
-      }
-    }
-  }
-
   // 구글 로그인 버튼
   Widget _buildGoogleButton() {
     if (_isGoogleLoading) {
@@ -445,41 +413,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         const Flexible(
           child: Text(
             'Google로 계속하기',
-            style: TextStyle(
-              color: AppColors.white,
-              fontSize: 16.0,
-              fontWeight: FontWeight.w500,
-            ),
-            overflow: TextOverflow.ellipsis, // 텍스트가 넘칠 경우 ...으로 표시
-          ),
-        ),
-      ],
-    );
-  }
-
-  // 애플 로그인 버튼
-  Widget _buildAppleButton() {
-    if (_isAppleLoading) {
-      return const CupertinoActivityIndicator();
-    }
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      mainAxisSize: MainAxisSize.min, // Row의 크기를 내용물에 맞게 조정
-      children: [
-        // 애플 아이콘 - 이미지 사용 (텍스트와 수직 중앙 정렬)
-        Padding(
-          padding: const EdgeInsets.only(top: 3.0), // 아이콘을 아래로 조정
-          child: Image.asset(
-            'assets/icons/apple_icon.png',
-            width: 24,
-            height: 24,
-          ),
-        ),
-        const SizedBox(width: 12.0),
-        const Flexible(
-          child: Text(
-            'Apple로 계속하기',
             style: TextStyle(
               color: AppColors.white,
               fontSize: 16.0,
@@ -745,9 +678,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                         style: const TextStyle(color: AppColors.white),
                         placeholderStyle:
                             const TextStyle(color: AppColors.textSecondary),
-                        enabled: !_isLoading &&
-                            !_isGoogleLoading &&
-                            !_isAppleLoading,
+                        enabled: !_isLoading && !_isGoogleLoading,
                       ),
 
                       SizedBox(height: verticalSpacing),
@@ -776,9 +707,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                         style: const TextStyle(color: AppColors.white),
                         placeholderStyle:
                             const TextStyle(color: AppColors.textSecondary),
-                        enabled: !_isLoading &&
-                            !_isGoogleLoading &&
-                            !_isAppleLoading,
+                        enabled: !_isLoading && !_isGoogleLoading,
                       ),
 
                       // 비밀번호 찾기 링크
@@ -807,7 +736,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                         child: CupertinoButton(
                           padding: EdgeInsets.zero,
                           onPressed:
-                              _isLoading || _isGoogleLoading || _isAppleLoading
+                              _isLoading || _isGoogleLoading
                                   ? null
                                   : _handleEmailLogin,
                           color: AppColors.primaryPurple,
@@ -864,36 +793,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
                       SizedBox(height: verticalSpacing * 1.5),
 
-                      // 소셜 로그인 버튼들
                       // 구글 로그인 버튼
-                      Container(
-                        margin: EdgeInsets.only(bottom: verticalSpacing),
+                      SizedBox(
                         height: buttonHeight,
                         child: CupertinoButton(
                           padding: EdgeInsets.zero,
                           color: AppColors.cardBackground
                               .withAlpha(204), // 반투명으로 설정
                           borderRadius: BorderRadius.circular(12),
-                          onPressed: (_isLoading || _isAppleLoading)
+                          onPressed: _isLoading
                               ? null
                               : _handleGoogleSignIn,
                           child: Center(child: _buildGoogleButton()),
-                        ),
-                      ),
-
-                      // 애플 로그인 버튼
-                      Container(
-                        margin: EdgeInsets.only(bottom: verticalSpacing),
-                        height: buttonHeight,
-                        child: CupertinoButton(
-                          padding: EdgeInsets.zero,
-                          color: AppColors.cardBackground
-                              .withAlpha(204), // 반투명으로 설정
-                          borderRadius: BorderRadius.circular(12),
-                          onPressed: (_isLoading || _isGoogleLoading)
-                              ? null
-                              : _handleAppleSignIn,
-                          child: Center(child: _buildAppleButton()),
                         ),
                       ),
 

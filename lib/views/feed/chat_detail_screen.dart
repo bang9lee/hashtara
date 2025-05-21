@@ -7,7 +7,7 @@ import '../../../constants/app_colors.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/chat_provider.dart';
 import '../../../providers/profile_provider.dart';
-
+import '../profile/profile_screen.dart';
 class ChatDetailScreen extends ConsumerStatefulWidget {
   final String chatId;
   final String chatName;
@@ -188,6 +188,57 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
       _showErrorDialog('채팅방 나가기 실패', '채팅방을 나가는 중 오류가 발생했습니다: $e');
     }
   }
+  
+  // 프로필 보기 - 새로 추가된 메소드
+  Future<void> _viewProfile() async {
+    if (widget.isGroup) {
+      // 그룹 채팅인 경우 그룹 정보 페이지로 이동 (아직 구현되지 않음)
+      _showErrorDialog('알림', '그룹 정보 보기 기능은 아직 준비 중입니다.');
+      return;
+    }
+    
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    if (currentUser == null) {
+      return;
+    }
+    
+    try {
+      // 1:1 채팅인 경우 상대방의 ID 찾기
+      final chatDetailsAsync = await ref.read(chatDetailProvider(widget.chatId).future);
+      
+      if (chatDetailsAsync == null) {
+        _showErrorDialog('오류', '채팅방 정보를 불러올 수 없습니다.');
+        return;
+      }
+      
+      // 상대방 ID 찾기
+      final participantIds = chatDetailsAsync.participantIds;
+      final otherUserId = participantIds.firstWhere(
+        (id) => id != currentUser.id, 
+        orElse: () => '',
+      );
+      
+      if (otherUserId.isEmpty) {
+        _showErrorDialog('오류', '상대방 정보를 찾을 수 없습니다.');
+        return;
+      }
+      
+      // 프로필 화면으로 이동
+      if (!mounted) return;
+      
+      Navigator.push(
+        context,
+        CupertinoPageRoute(
+          builder: (context) => ProfileScreen(
+            userId: otherUserId,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showErrorDialog('오류', '프로필을 불러오는 중 오류가 발생했습니다: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -200,7 +251,7 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
     return CupertinoPageScaffold(
       backgroundColor: AppColors.darkBackground,
       navigationBar: CupertinoNavigationBar(
-        backgroundColor: AppColors.primaryPurple,
+        backgroundColor: const Color.fromARGB(0, 124, 95, 255),
         border: const Border(
           bottom: BorderSide(color: AppColors.separator),
         ),
@@ -255,7 +306,8 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
                   CupertinoActionSheetAction(
                     onPressed: () {
                       Navigator.pop(context);
-                      // 프로필 보기 (구현 필요)
+                      // 프로필 보기 구현
+                      _viewProfile();
                     },
                     child: const Text('프로필 보기'),
                   ),

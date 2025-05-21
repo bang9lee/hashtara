@@ -460,7 +460,7 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
                     ),
                   ),
 
-                  // 전송 버튼
+                  // 전송 버튼 - 색상 변경
                   const SizedBox(width: 8),
                   CupertinoButton(
                     padding: EdgeInsets.zero,
@@ -469,7 +469,8 @@ class _CommentDetailScreenState extends ConsumerState<CommentDetailScreen> {
                         ? const CupertinoActivityIndicator()
                         : const Icon(
                             CupertinoIcons.paperplane_fill,
-                            color: Color.fromARGB(0, 68, 46, 167),
+                            // 색상 수정
+                            color: AppColors.primaryPurple,
                             size: 28,
                           ),
                   ),

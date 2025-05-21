@@ -45,6 +45,12 @@ class AppColors {
   static const Color iosWarning = CupertinoColors.systemOrange;
   static const Color iosError = CupertinoColors.systemRed;
   
+  // 알림 액센트 색상 추가 (기존 iOS 컬러를 활용하고 별도 이름을 부여)
+  static const Color accentRed = CupertinoColors.systemRed;     // 알림, 좋아요 등
+  static const Color accentBlue = CupertinoColors.systemBlue;   // 댓글, 정보
+  static const Color accentGreen = CupertinoColors.systemGreen; // 성공, 응답
+  static const Color accentYellow = CupertinoColors.systemYellow; // 경고, 메시지
+  
   // 로고 그라데이션
   static const LinearGradient logoGradient = LinearGradient(
     begin: Alignment.topLeft,
@@ -60,7 +66,7 @@ class AppColors {
     stops: [0.0, 0.5, 1.0],
   );
   
-  // 주요 그라데이션 (기본 앱 테마) - 오류 수정을 위해 추가
+  // 주요 그라데이션 (기본 앱 테마)
   static const LinearGradient primaryGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
