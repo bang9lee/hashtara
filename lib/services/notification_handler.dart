@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import '../models/notification_model.dart';
@@ -7,7 +6,6 @@ import '../repositories/notification_repository.dart';
 /// NotificationHandler 클래스는 앱 내에서 발생하는 이벤트에 대해 알림을 생성하고,
 /// Firestore에 저장하는 역할을 합니다.
 class NotificationHandler {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final NotificationRepository _notificationRepository = NotificationRepository();
   final Uuid _uuid = const Uuid();
   
@@ -28,7 +26,7 @@ class NotificationHandler {
     required String commentorId,
     required String commentorUsername,
     required String commentText,
-    String? postTitle,  // 게시물 제목 추가
+    String? postTitle,
   }) async {
     try {
       // 자신의 게시물에 댓글 단 경우 알림 생성 안함
@@ -37,7 +35,7 @@ class NotificationHandler {
         return;
       }
       
-      // 알림 ID 생성 - const 사용
+      // 알림 ID 생성
       const uuid = Uuid();
       final notificationId = uuid.v4();
       
@@ -63,22 +61,13 @@ class NotificationHandler {
           'commentorId': commentorId,
           'commentText': commentText,
           'postTitle': postTitle,
-          'id': notificationId, // 알림 ID 추가
         },
         isRead: false,
         createdAt: DateTime.now(),
       );
       
-      // Firestore에 알림 저장
+      // Firestore에 알림 저장 (Firebase Functions가 자동으로 FCM 전송)
       await _notificationRepository.saveNotification(notification);
-      
-      // FCM 메시지 설정 및 전송 요청
-      await _setupFCMMessageRequest(
-        userId: postOwnerId,
-        title: notification.title,
-        body: notification.body,
-        data: notification.data,
-      );
       
       debugPrint('댓글 알림 생성 성공: $notificationId');
     } catch (e) {
@@ -111,24 +100,15 @@ class NotificationHandler {
         type: NotificationType.follow,
         data: {
           'type': 'follow',
-          'targetId': followerId,  // 팔로워의 프로필로 이동하기 위해
+          'targetId': followerId,
           'followerId': followerId,
-          'id': notificationId, // 알림 ID 추가
         },
         isRead: false,
         createdAt: DateTime.now(),
       );
       
-      // Firestore에 알림 저장
+      // Firestore에 알림 저장 (Firebase Functions가 자동으로 FCM 전송)
       await _notificationRepository.saveNotification(notification);
-      
-      // FCM 메시지 설정 및 전송 요청
-      await _setupFCMMessageRequest(
-        userId: followingId,
-        title: notification.title,
-        body: notification.body,
-        data: notification.data,
-      );
       
       debugPrint('팔로우 알림 생성 성공: $notificationId');
     } catch (e) {
@@ -145,7 +125,7 @@ class NotificationHandler {
     required String replierId,
     required String replierUsername,
     required String replyText,
-    String? commentText,  // 원 댓글 내용 추가
+    String? commentText,
   }) async {
     try {
       // 자신의 댓글에 답글 단 경우 알림 생성 안함
@@ -184,22 +164,13 @@ class NotificationHandler {
           'replierId': replierId,
           'replyText': replyText,
           'commentText': commentText,
-          'id': notificationId, // 알림 ID 추가
         },
         isRead: false,
         createdAt: DateTime.now(),
       );
       
-      // Firestore에 알림 저장
+      // Firestore에 알림 저장 (Firebase Functions가 자동으로 FCM 전송)
       await _notificationRepository.saveNotification(notification);
-      
-      // FCM 메시지 설정 및 전송 요청
-      await _setupFCMMessageRequest(
-        userId: commentOwnerId,
-        title: notification.title,
-        body: notification.body,
-        data: notification.data,
-      );
       
       debugPrint('답글 알림 생성 성공: $notificationId');
     } catch (e) {
@@ -213,7 +184,7 @@ class NotificationHandler {
     required String postOwnerId,
     required String likerId,
     required String likerUsername,
-    String? postTitle,  // 게시물 제목 추가
+    String? postTitle,
   }) async {
     try {
       // 자신의 게시물에 좋아요 한 경우 알림 생성 안함
@@ -247,22 +218,13 @@ class NotificationHandler {
           'targetId': postId,
           'likerId': likerId,
           'postTitle': postTitle,
-          'id': notificationId, // 알림 ID 추가
         },
         isRead: false,
         createdAt: DateTime.now(),
       );
       
-      // Firestore에 알림 저장
+      // Firestore에 알림 저장 (Firebase Functions가 자동으로 FCM 전송)
       await _notificationRepository.saveNotification(notification);
-      
-      // FCM 메시지 설정 및 전송 요청
-      await _setupFCMMessageRequest(
-        userId: postOwnerId,
-        title: notification.title,
-        body: notification.body,
-        data: notification.data,
-      );
       
       debugPrint('좋아요 알림 생성 성공: $notificationId');
     } catch (e) {
@@ -295,23 +257,13 @@ class NotificationHandler {
           'chatId': chatId,
           'senderId': senderId,
           'messageText': messageText,
-          'id': notificationId, // 알림 ID 추가
         },
         isRead: false,
         createdAt: DateTime.now(),
       );
       
-      // Firestore에 알림 저장
+      // Firestore에 알림 저장 (Firebase Functions가 자동으로 FCM 전송)
       await _notificationRepository.saveNotification(notification);
-      
-      // FCM 메시지 설정 및 전송 요청 (메시지는 배지 추가)
-      await _setupFCMMessageRequest(
-        userId: receiverId,
-        title: notification.title,
-        body: notification.body,
-        data: notification.data,
-        badge: 1, // 배지 추가
-      );
       
       debugPrint('메시지 알림 생성 성공: $notificationId');
     } catch (e) {
@@ -330,10 +282,9 @@ class NotificationHandler {
       // 알림 ID 생성
       final notificationId = _uuid.v4();
       
-      // data에 ID와 type 추가
+      // data에 type 추가
       final notificationData = {
         ...data,
-        'id': notificationId,
         'type': 'other',
       };
       
@@ -349,105 +300,12 @@ class NotificationHandler {
         createdAt: DateTime.now(),
       );
       
-      // Firestore에 알림 저장
+      // Firestore에 알림 저장 (Firebase Functions가 자동으로 FCM 전송)
       await _notificationRepository.saveNotification(notification);
-      
-      // FCM 메시지 설정 및 전송 요청
-      await _setupFCMMessageRequest(
-        userId: userId,
-        title: notification.title,
-        body: notification.body,
-        data: notification.data,
-      );
       
       debugPrint('커스텀 알림 생성 성공: $notificationId');
     } catch (e) {
       debugPrint('커스텀 알림 생성 실패: $e');
-    }
-  }
-  
-  // FCM 메시지 요청 설정
-  Future<void> _setupFCMMessageRequest({
-    required String userId,
-    required String title,
-    required String body,
-    required Map<String, dynamic> data,
-    int? badge,
-  }) async {
-    try {
-      // 토큰 정보 가져오기
-      final userDoc = await _firestore.collection('users').doc(userId).get();
-      final userData = userDoc.data();
-      
-      if (userData != null && userData['fcmTokens'] != null) {
-        final fcmTokens = List<String>.from(userData['fcmTokens']);
-        
-        // 토큰이 있는 경우에만 FCM 요청 생성
-        if (fcmTokens.isNotEmpty) {
-          final fcmRequest = {
-            'tokens': fcmTokens,
-            'notification': {
-              'title': title,
-              'body': body,
-            },
-            'data': data,
-            'createdAt': FieldValue.serverTimestamp(),
-            'sent': false,
-            'priority': 'high', // 우선순위 높음
-            'sound': 'default', // 기본 알림음
-            'contentAvailable': true, // 백그라운드에서도 처리
-            'clickAction': 'FLUTTER_NOTIFICATION_CLICK', // Flutter 앱 열기
-            'mutableContent': true, // iOS - 알림 내용 수정 가능 (커스텀 액션 등)
-            'category': 'message', // iOS - 알림 카테고리 지정
-          };
-          
-          // 모바일 알림 설정 강화
-          fcmRequest['android'] = {
-            'priority': 'high', // Android 우선순위
-            'notification': {
-              'channelId': 'hashtara_notifications', // Android 채널 ID
-              'clickAction': 'FLUTTER_NOTIFICATION_CLICK',
-              'visibility': 'public', // 잠금화면에서도 표시
-              'priority': 'max', // 알림 우선순위 (팝업 표시)
-              'defaultSound': true, // 기본 알림음 사용
-              'defaultVibrateTimings': true, // 기본 진동 사용
-              'notificationCount': 1, // 알림 카운트
-            }
-          };
-          
-          // 배지 추가 (iOS)
-          if (badge != null) {
-            fcmRequest['apns'] = {
-              'headers': {
-                'apns-priority': '10', // 높은 우선순위
-              },
-              'payload': {
-                'aps': {
-                  'badge': badge,
-                  'sound': 'default',
-                  'content-available': 1, // 백그라운드에서도 처리
-                  'mutable-content': 1, // 알림 내용 수정 가능
-                  'category': 'message', // 알림 카테고리
-                  'alert': {
-                    'title': title,
-                    'body': body,
-                  },
-                },
-              },
-            };
-          }
-          
-          // 메시지 큐에 저장
-          await _firestore.collection('fcm_messages').add(fcmRequest);
-          debugPrint('FCM 메시지 요청 생성: $title');
-        } else {
-          debugPrint('FCM 토큰이 없음: $userId');
-        }
-      } else {
-        debugPrint('사용자 FCM 토큰 정보 없음: $userId');
-      }
-    } catch (e) {
-      debugPrint('FCM 메시지 요청 생성 실패: $e');
     }
   }
   

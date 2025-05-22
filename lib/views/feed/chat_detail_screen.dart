@@ -585,7 +585,7 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
     Widget senderInfo = const SizedBox.shrink();
     if (!isMe) {
       // getProfileProvider 사용 (수정된 부분)
-      final senderAsync = ref.watch(getProfileProvider(message.senderId));
+      final senderAsync = ref.watch(getUserProfileProvider(message.senderId));
       senderInfo = senderAsync.when(
         data: (sender) {
           return Padding(

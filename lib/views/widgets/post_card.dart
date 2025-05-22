@@ -11,6 +11,7 @@ import '../../views/feed/post_detail_screen.dart';
 import '../../views/feed/edit_post_screen.dart';
 import '../../views/feed/photo_view_screen.dart';
 import '../profile/profile_screen.dart';
+import '../../../providers/profile_provider.dart';
 
 class PostCard extends ConsumerStatefulWidget {
   final PostModel post;

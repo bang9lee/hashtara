@@ -64,7 +64,7 @@
                 android:value="hashtara_notifications" />
             <meta-data
                 android:name="com.google.firebase.messaging.default_notification_icon"
-                android:resource="@mipmap/ic_launcher" />
+                android:resource="@drawable/ic_notification" />
 
             <!-- 🔥 인텐트 필터 -->
             <intent-filter>

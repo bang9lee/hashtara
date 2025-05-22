@@ -191,7 +191,7 @@ class NotificationService {
     // 포그라운드 메시지 처리
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       debugPrint('📱 포그라운드 메시지 수신: ${message.notification?.title}');
-      _showLocalNotification(message);
+      showLocalNotification(message);
     });
     
     // 백그라운드에서 앱이 열릴 때
@@ -209,10 +209,10 @@ class NotificationService {
     });
   }
   
-  // 로컬 알림 표시 (🔥 모든 const 문제 해결)
-  Future<void> _showLocalNotification(RemoteMessage message) async {
+  // 로컬 알림 표시 (public 메서드로 변경)
+  Future<void> showLocalNotification(RemoteMessage message) async {
     try {
-      // 🔥 동적 값을 포함하는 객체는 const 제거
+      // 동적 값을 포함하는 객체는 const 제거
       final androidDetails = AndroidNotificationDetails(
         'hashtara_notifications',
         'Hashtara 알림',
@@ -340,7 +340,7 @@ class NotificationService {
     }
   }
   
-  // 🔥 테스트 알림 전송 (모든 const 문제 해결)
+  // 테스트 알림 전송
   Future<void> sendTestNotification() async {
     try {
       await _localNotifications.show(

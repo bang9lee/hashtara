@@ -2,28 +2,24 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/profile_model.dart';
 import '../models/user_model.dart';
-import '../repositories/profile_repository.dart'; // 올바른 임포트 경로로 수정
-import 'auth_provider.dart' hide getUserProfileProvider; // 충돌 해결을 위해 제외
+import '../repositories/profile_repository.dart';
+import 'auth_provider.dart';
 import 'package:flutter/material.dart';
 
-// 프로필 저장소 프로바이더
+// 프로필 저장소 프로바이더 (단일 인스턴스)
 final profileRepositoryProvider = Provider<ProfileRepository>((ref) {
   return ProfileRepository();
 });
 
-// 사용자 정보 프로바이더 (ID로) - auth_provider.dart와 중복되지 않도록 이름 변경
-final getProfileProvider = FutureProvider.family<UserModel?, String>((ref, userId) async {
-  try {
-    final repository = ref.read(profileRepositoryProvider);
-    return await repository.getUserById(userId);
-  } catch (e) {
-    debugPrint('사용자 프로필 조회 오류: $e');
-    return null;
-  }
+// 사용자 정보 프로바이더 (UserModel - ID로 조회)
+// auth_provider.dart에서 이동됨
+final getUserProfileProvider = FutureProvider.family<UserModel?, String>((ref, userId) async {
+  final repository = ref.watch(authRepositoryProvider);
+  return repository.getUserProfile(userId);
 });
 
-// 현재 사용자 프로필 프로바이더
-final userProfileProvider = FutureProvider<ProfileModel?>((ref) async {
+// 현재 사용자의 ProfileModel 프로바이더
+final userProfileModelProvider = FutureProvider<ProfileModel?>((ref) async {
   final repository = ref.watch(profileRepositoryProvider);
   final authState = ref.watch(authStateProvider);
   
@@ -39,7 +35,7 @@ final userProfileProvider = FutureProvider<ProfileModel?>((ref) async {
   );
 });
 
-// 프로필 관리 프로바이더
+// 프로필 관리 컨트롤러
 final profileControllerProvider = StateNotifierProvider<ProfileController, AsyncValue<ProfileModel?>>((ref) {
   final repository = ref.watch(profileRepositoryProvider);
   return ProfileController(repository, ref);
@@ -67,6 +63,7 @@ final userFollowersProvider = FutureProvider.family<List<UserModel>, String>((re
   }
 });
 
+// ProfileController 클래스
 class ProfileController extends StateNotifier<AsyncValue<ProfileModel?>> {
   final ProfileRepository _repository;
   final Ref _ref;
@@ -121,13 +118,13 @@ class ProfileController extends StateNotifier<AsyncValue<ProfileModel?>> {
     }
   }
   
-  // 프로필 업데이트 (해시태그 필드 추가)
+  // 프로필 업데이트
   Future<void> updateProfile({
     required String userId,
     String? bio,
     List<String>? interests,
     String? location,
-    List<String>? favoriteHashtags, // 좋아하는 해시태그 필드 추가
+    List<String>? favoriteHashtags,
   }) async {
     try {
       final currentProfile = state.value;
@@ -151,7 +148,7 @@ class ProfileController extends StateNotifier<AsyncValue<ProfileModel?>> {
           postCount: 0,
           followersCount: 0,
           followingCount: 0,
-          favoriteHashtags: favoriteHashtags, // 해시태그 저장
+          favoriteHashtags: favoriteHashtags,
         );
         
         await _repository.updateProfile(newProfile);
@@ -159,7 +156,8 @@ class ProfileController extends StateNotifier<AsyncValue<ProfileModel?>> {
       }
       
       // 관련 프로바이더 갱신
-      debugPrint('Provider 갱신 완료: ${_ref.refresh(userProfileProvider).hashCode}');
+      _ref.invalidate(userProfileModelProvider);
+      _ref.invalidate(getUserProfileProvider(userId));
     } catch (e, stack) {
       state = AsyncValue.error(e, stack);
     }
@@ -171,7 +169,8 @@ class ProfileController extends StateNotifier<AsyncValue<ProfileModel?>> {
       final imageUrl = await _repository.uploadProfileImage(userId, imageFile);
       
       // 관련 프로바이더 갱신
-      debugPrint('Provider 갱신 완료: ${_ref.refresh(currentUserProvider).hashCode}, ${_ref.refresh(getProfileProvider(userId)).hashCode}');
+      _ref.invalidate(currentUserProvider);
+      _ref.invalidate(getUserProfileProvider(userId));
       
       return imageUrl;
     } catch (e) {
@@ -199,8 +198,8 @@ class ProfileController extends StateNotifier<AsyncValue<ProfileModel?>> {
       await loadProfile(followingId);
       
       // 관련 프로바이더 갱신
-      debugPrint('팔로워 목록 갱신: ${_ref.refresh(userFollowersProvider(followingId)).hashCode}');
-      debugPrint('팔로잉 목록 갱신: ${_ref.refresh(userFollowingProvider(followerId)).hashCode}');
+      _ref.invalidate(userFollowersProvider(followingId));
+      _ref.invalidate(userFollowingProvider(followerId));
     } catch (e) {
       debugPrint('팔로우 실패: $e');
       rethrow;
@@ -216,8 +215,8 @@ class ProfileController extends StateNotifier<AsyncValue<ProfileModel?>> {
       await loadProfile(followingId);
       
       // 관련 프로바이더 갱신
-      debugPrint('팔로워 목록 갱신: ${_ref.refresh(userFollowersProvider(followingId)).hashCode}');
-      debugPrint('팔로잉 목록 갱신: ${_ref.refresh(userFollowingProvider(followerId)).hashCode}');
+      _ref.invalidate(userFollowersProvider(followingId));
+      _ref.invalidate(userFollowingProvider(followerId));
     } catch (e) {
       debugPrint('언팔로우 실패: $e');
       rethrow;

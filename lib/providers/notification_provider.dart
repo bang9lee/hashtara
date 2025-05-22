@@ -52,16 +52,10 @@ class NotificationController extends StateNotifier<AsyncValue<void>> {
   }
   
   // 모든 알림을 읽음 표시
-  Future<void> markAllNotificationsAsRead() async {
+  Future<void> markAllNotificationsAsRead(String userId) async {
     try {
       state = const AsyncValue.loading();
-      // 현재 사용자 ID를 어떻게 가져올지는 앱 구조에 따라 달라질 수 있음
-      // 여기서는 예시로 하드코딩하지만, 실제로는 ref를 통해 currentUser를 가져와야 함
-      // final userId = ref.read(currentUserProvider).value?.id;
-      // if (userId != null) {
-      //   await _repository.markAllNotificationsAsRead(userId);
-      // }
-      
+      await _repository.markAllNotificationsAsRead(userId);
       state = const AsyncValue.data(null);
       debugPrint('모든 알림 읽음 표시 성공');
     } catch (e, stackTrace) {

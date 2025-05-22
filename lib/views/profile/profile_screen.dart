@@ -46,7 +46,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     // 사용자 프로필 및 프로필 상세 정보 로드
     ref.read(profileControllerProvider.notifier).loadProfile(widget.userId);
     // 유저 프로필 정보 명시적으로 리프레시 (결과값 활용)
-    final _ = ref.refresh(getProfileProvider(widget.userId));
+    final _ = ref.refresh(getUserProfileProvider(widget.userId));
     
     // 현재 유저가 해당 프로필 사용자를 팔로우하고 있는지 확인
     _checkIfFollowing();
@@ -275,7 +275,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       if (chatId == null) return;
 
       // 상대방 정보 가져오기
-      final otherUser = await ref.read(getProfileProvider(widget.userId).future);
+      final otherUser = await ref.read(getUserProfileProvider(widget.userId).future);
       
       // 여기서도 mounted 체크 필요 (async gap 이후)
       if (!mounted) return;
@@ -511,7 +511,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   
   @override
   Widget build(BuildContext context) {
-    final userAsync = ref.watch(getProfileProvider(widget.userId));
+    final userAsync = ref.watch(getUserProfileProvider(widget.userId));
     final profileAsync = ref.watch(profileControllerProvider);
     final postsAsync = ref.watch(userPostsProvider(widget.userId));
     final currentUser = ref.watch(currentUserProvider);

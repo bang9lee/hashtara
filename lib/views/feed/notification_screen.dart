@@ -1,7 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:timeago/timeago.dart' as timeago;
 import '../../constants/app_colors.dart';
 import '../../models/notification_model.dart';
 import '../../providers/notification_provider.dart';
@@ -30,10 +29,15 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
   }
   
   // 모든 알림을 읽음 상태로 표시
-  void _markAllAsRead() {
+  Future<void> _markAllAsRead() async {
     final currentUser = ref.read(currentUserProvider).valueOrNull;
     if (currentUser != null) {
-      ref.read(notificationServiceProvider).markNotificationsAsRead();
+      // NotificationController를 통해 모든 알림 읽음 처리
+      await ref.read(notificationControllerProvider.notifier)
+          .markAllNotificationsAsRead(currentUser.id);
+      
+      // iOS 앱 배지 초기화
+      await ref.read(notificationServiceProvider).resetBadgeCount();
     }
   }
   
@@ -65,9 +69,10 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
             ),
             trailing: CupertinoButton(
               padding: EdgeInsets.zero,
-              onPressed: () {
+              onPressed: () async {
                 // 모든 알림 읽음 표시
-                ref.read(notificationControllerProvider.notifier).markAllNotificationsAsRead();
+                await ref.read(notificationControllerProvider.notifier)
+                    .markAllNotificationsAsRead(user.id);
               },
               child: const Text(
                 '모두 읽음',
@@ -218,65 +223,85 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
   
   // 알림 항목
   Widget _buildNotificationItem(NotificationModel notification) {
-    return GestureDetector(
-      onTap: () {
-        // 알림 클릭 시 처리
-        _handleNotificationTap(notification);
+    return Dismissible(
+      key: Key(notification.id),
+      direction: DismissDirection.endToStart,
+      onDismissed: (direction) {
+        // 알림 삭제
+        ref.read(notificationControllerProvider.notifier)
+            .deleteNotification(notification.id);
       },
-      child: Container(
-        color: notification.isRead 
-          ? AppColors.darkBackground 
-          : AppColors.primaryPurple.withAlpha(25),
-        padding: const EdgeInsets.symmetric(
-          horizontal: 16.0,
-          vertical: 12.0,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        color: CupertinoColors.systemRed,
+        child: const Icon(
+          CupertinoIcons.delete,
+          color: CupertinoColors.white,
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildNotificationIcon(notification.type),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    notification.title,
-                    style: TextStyle(
-                      color: AppColors.white,
-                      fontWeight: notification.isRead ? FontWeight.normal : FontWeight.bold,
-                      fontSize: 16,
+      ),
+      child: GestureDetector(
+        onTap: () {
+          // 알림 클릭 시 처리
+          _handleNotificationTap(notification);
+        },
+        child: Container(
+          color: notification.isRead 
+            ? AppColors.darkBackground 
+            : AppColors.primaryPurple.withAlpha(25),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16.0,
+            vertical: 12.0,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildNotificationIcon(notification.type),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      notification.title,
+                      style: TextStyle(
+                        color: AppColors.white,
+                        fontWeight: notification.isRead ? FontWeight.normal : FontWeight.bold,
+                        fontSize: 16,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    notification.body,
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 14,
+                    const SizedBox(height: 4),
+                    Text(
+                      notification.body,
+                      style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 14,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    timeago.format(notification.createdAt, locale: 'ko'),
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 12,
+                    const SizedBox(height: 4),
+                    Text(
+                      _formatTime(notification.createdAt),
+                      style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 12,
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            if (!notification.isRead)
-              Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(
-                  color: AppColors.primaryPurple,
-                  shape: BoxShape.circle,
+                  ],
                 ),
               ),
-          ],
+              if (!notification.isRead)
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: AppColors.primaryPurple,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -297,19 +322,19 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
         iconColor = AppColors.primaryPurple;
         break;
       case NotificationType.like:
-        iconData = CupertinoIcons.heart;
-        iconColor = AppColors.primaryPurple;
+        iconData = CupertinoIcons.heart_fill;
+        iconColor = CupertinoColors.systemPink;
         break;
       case NotificationType.follow:
-        iconData = CupertinoIcons.person_add;
-        iconColor = AppColors.primaryPurple;
+        iconData = CupertinoIcons.person_add_solid;
+        iconColor = CupertinoColors.systemBlue;
         break;
       case NotificationType.message:
-        iconData = CupertinoIcons.envelope;
-        iconColor = AppColors.primaryPurple;
+        iconData = CupertinoIcons.envelope_fill;
+        iconColor = CupertinoColors.systemOrange;
         break;
       case NotificationType.other:
-        iconData = CupertinoIcons.bell;
+        iconData = CupertinoIcons.bell_fill;
         iconColor = AppColors.textEmphasis;
         break;
     }
@@ -333,7 +358,8 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
   void _handleNotificationTap(NotificationModel notification) {
     // 1. 알림을 읽음 표시
     if (!notification.isRead) {
-      ref.read(notificationControllerProvider.notifier).markNotificationAsRead(notification.id);
+      ref.read(notificationControllerProvider.notifier)
+          .markNotificationAsRead(notification.id);
     }
     
     // 2. 알림 타입에 따라 다른 화면으로 이동
@@ -346,7 +372,26 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
     }
     
     // 헬퍼 클래스를 사용하여 네비게이션 처리
-    final type = data['type'] as String?;
+    final type = notification.data['type'] as String?;
     NotificationHelpers.navigateToScreenByType(context, type, targetId);
+  }
+  
+  // 시간 포맷 함수
+  String _formatTime(DateTime dateTime) {
+    // timeago 라이브러리가 한국어를 지원하지 않는 경우 직접 구현
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+    
+    if (difference.inDays > 7) {
+      return '${dateTime.month}월 ${dateTime.day}일';
+    } else if (difference.inDays > 0) {
+      return '${difference.inDays}일 전';
+    } else if (difference.inHours > 0) {
+      return '${difference.inHours}시간 전';
+    } else if (difference.inMinutes > 0) {
+      return '${difference.inMinutes}분 전';
+    } else {
+      return '방금 전';
+    }
   }
 }

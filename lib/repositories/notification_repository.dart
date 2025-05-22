@@ -85,7 +85,7 @@ class NotificationRepository {
     }
   }
   
-  // 사용자 알림 목록 가져오기
+  // 사용자 알림 목록 가져오기 (읽음 여부 관계없이 모든 알림)
   Stream<List<NotificationModel>> getUserNotifications(String userId) {
     try {
       return _notificationsCollection
@@ -94,6 +94,7 @@ class NotificationRepository {
           .limit(50) // 최신 50개만 가져오기
           .snapshots()
           .map((snapshot) {
+            debugPrint('알림 목록 조회: ${snapshot.docs.length}개');
             return snapshot.docs
                 .map((doc) => NotificationModel.fromFirestore(doc))
                 .toList();
@@ -148,12 +149,10 @@ class NotificationRepository {
     }
   }
   
-  // 모든 알림 읽음 표시
+  // 모든 알림 읽음 표시 - WriteBatch 사용
   Future<void> markAllNotificationsAsRead(String userId) async {
     try {
-      // 일괄 업데이트를 위한 배치 작업
-      final batch = _firestore.batch();
-      
+      // 읽지 않은 알림만 조회
       final snapshot = await _notificationsCollection
           .where('userId', isEqualTo: userId)
           .where('isRead', isEqualTo: false)
@@ -164,6 +163,11 @@ class NotificationRepository {
         return;
       }
       
+      debugPrint('읽지 않은 알림 ${snapshot.docs.length}개 발견');
+      
+      // WriteBatch를 사용하여 일괄 업데이트
+      final batch = _firestore.batch();
+      
       for (final doc in snapshot.docs) {
         batch.update(doc.reference, {
           'isRead': true,
@@ -171,8 +175,9 @@ class NotificationRepository {
         });
       }
       
+      // 배치 실행
       await batch.commit();
-      debugPrint('모든 알림 읽음 표시 성공: ${snapshot.docs.length}개');
+      debugPrint('모든 알림 읽음 표시 성공: ${snapshot.docs.length}개 업데이트됨');
     } catch (e) {
       debugPrint('모든 알림 읽음 표시 실패: $e');
       rethrow;

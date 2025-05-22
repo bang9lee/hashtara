@@ -240,12 +240,6 @@ final currentUserProvider = FutureProvider<UserModel?>((ref) async {
   );
 });
 
-// 사용자 프로필 조회 프로바이더
-final getUserProfileProvider = FutureProvider.family<UserModel?, String>((ref, userId) {
-  final repository = ref.watch(authRepositoryProvider);
-  return repository.getUserProfile(userId);
-});
-
 // 회원가입 진행 상태를 위한 프로바이더
 final signupProgressProvider = StateProvider<SignupProgress>((ref) => SignupProgress.none);
 
@@ -701,9 +695,8 @@ class AuthController extends StateNotifier<AsyncValue<void>> {
         
         await _repository.updateUserProfile(updatedUser);
         
-        // unused result 해결
-        final refreshResult = _ref.refresh(currentUserProvider);
-        debugPrint('프로바이더 갱신 결과: ${refreshResult.hashCode}');
+        // Provider 갱신
+        _ref.invalidate(currentUserProvider);
         
         state = const AsyncValue.data(null);
         debugPrint('🔥 프로필 업데이트 성공');

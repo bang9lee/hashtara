@@ -150,7 +150,7 @@ class _ChatsListScreenState extends ConsumerState<ChatsListScreen> {
       imageUrl = chat.groupImageUrl;
     } else {
       // 1:1 채팅인 경우 상대방 정보 가져오기
-      final otherUserAsync = ref.watch(getProfileProvider(otherUserId));
+      final otherUserAsync = ref.watch(getUserProfileProvider(otherUserId));
       
       return otherUserAsync.when(
         data: (otherUser) {

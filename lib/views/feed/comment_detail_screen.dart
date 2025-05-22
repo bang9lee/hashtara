@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../constants/app_colors.dart';
 import '../../../models/comment_model.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/profile_provider.dart';
 import '../../../providers/comment_provider.dart';
 import '../widgets/user_avatar.dart';
 import '../../views/profile/profile_screen.dart';

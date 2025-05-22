@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import '../models/comment_model.dart';
+import '../services/notification_handler.dart';
 
 class CommentRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -170,7 +171,7 @@ class CommentRepository {
     return controller.stream;
   }
   
-  // 댓글 추가
+  // 댓글 추가 - 트랜잭션 사용 및 알림 생성 추가
   Future<String> addComment({
     required String postId,
     required String userId,
@@ -180,35 +181,108 @@ class CommentRepository {
     debugPrint('댓글 추가 시작 - postId: $postId, userId: $userId, text: $text, replyToCommentId: $replyToCommentId');
     
     try {
-      // 1. 댓글 문서 생성
+      // 댓글 문서 참조 생성
       final commentRef = _firestore.collection('comments').doc();
       final commentId = commentRef.id;
       
-      final now = DateTime.now();
-      
-      // 댓글 데이터
-      final commentData = {
-        'id': commentId,
-        'postId': postId,
-        'userId': userId,
-        'text': text,
-        'createdAt': Timestamp.fromDate(now),
-        'replyToCommentId': replyToCommentId,
-      };
-      
-      // 댓글 문서 생성
-      await commentRef.set(commentData);
-      debugPrint('댓글 문서 생성 완료: $commentId');
-      
-      // 2. 게시물 댓글 수 업데이트 (replyToCommentId가 null인 경우만)
-      if (replyToCommentId == null) {
-        await _updatePostCommentCount(postId, 1);
+      // 게시물 정보와 사용자 정보를 먼저 가져오기 (알림 생성을 위해)
+      final postDoc = await _firestore.collection('posts').doc(postId).get();
+      if (!postDoc.exists) {
+        throw Exception('게시물이 존재하지 않습니다');
       }
       
-      debugPrint('댓글 추가 완료');
+      final postData = postDoc.data()!;
+      final postOwnerId = postData['userId'] as String;
+      final postCaption = postData['caption'] as String?;
+      
+      // 댓글 작성자 정보 가져오기
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (!userDoc.exists) {
+        throw Exception('사용자 정보를 찾을 수 없습니다');
+      }
+      
+      final userData = userDoc.data()!;
+      final commentorUsername = userData['username'] as String? ?? userData['name'] as String? ?? 'Someone';
+      
+      // 트랜잭션으로 댓글 추가와 카운트 업데이트를 원자적으로 처리
+      await _firestore.runTransaction((transaction) async {
+        // 1. 댓글 데이터 준비
+        final commentData = {
+          'id': commentId,
+          'postId': postId,
+          'userId': userId,
+          'text': text,
+          'createdAt': FieldValue.serverTimestamp(),
+          'replyToCommentId': replyToCommentId,
+        };
+        
+        // 2. 댓글 문서 생성
+        transaction.set(commentRef, commentData);
+        
+        // 3. 게시물 댓글 수 업데이트
+        final currentCount = postData['commentsCount'] ?? 0;
+        final newCount = currentCount + 1;
+        
+        debugPrint('댓글 카운트 업데이트: $currentCount → $newCount');
+        
+        transaction.update(_firestore.collection('posts').doc(postId), {
+          'commentsCount': newCount,
+        });
+      }, timeout: const Duration(seconds: 10));
+      
+      // 4. 알림 생성 (트랜잭션 외부에서 처리)
+      if (postOwnerId != userId) {
+        debugPrint('알림 생성 시작: 게시물 작성자($postOwnerId)에게 댓글 알림');
+        
+        try {
+          final notificationHandler = NotificationHandler();
+          
+          if (replyToCommentId == null) {
+            // 일반 댓글 알림
+            await notificationHandler.createCommentNotification(
+              postId: postId,
+              postOwnerId: postOwnerId,
+              commentId: commentId,
+              commentorId: userId,
+              commentorUsername: commentorUsername,
+              commentText: text,
+              postTitle: postCaption,
+            );
+            debugPrint('댓글 알림 생성 완료');
+          } else {
+            // 답글 알림 (답글인 경우)
+            final parentCommentDoc = await _firestore.collection('comments').doc(replyToCommentId).get();
+            if (parentCommentDoc.exists) {
+              final parentCommentData = parentCommentDoc.data()!;
+              final parentCommentOwnerId = parentCommentData['userId'] as String;
+              final parentCommentText = parentCommentData['text'] as String?;
+              
+              if (parentCommentOwnerId != userId) {
+                await notificationHandler.createReplyNotification(
+                  postId: postId,
+                  commentId: replyToCommentId,
+                  commentOwnerId: parentCommentOwnerId,
+                  replyId: commentId,
+                  replierId: userId,
+                  replierUsername: commentorUsername,
+                  replyText: text,
+                  commentText: parentCommentText,
+                );
+                debugPrint('답글 알림 생성 완료');
+              }
+            }
+          }
+        } catch (notifError) {
+          // 알림 생성 실패는 댓글 작성을 막지 않음
+          debugPrint('알림 생성 실패 (무시하고 진행): $notifError');
+        }
+      }
+      
+      debugPrint('댓글 추가 완료: $commentId');
       return commentId;
-    } catch (e) {
+    } catch (e, stackTrace) {
       debugPrint('댓글 추가 실패: $e');
+      debugPrint('스택 트레이스: $stackTrace');
       rethrow;
     }
   }
@@ -232,71 +306,69 @@ class CommentRepository {
     }
   }
   
-  // 댓글 삭제
+  // 댓글 삭제 - 트랜잭션 사용으로 수정
   Future<void> deleteComment({
     required String commentId,
     required String postId,
-    bool isReply = false, // 답글인지 여부
+    bool isReply = false,
   }) async {
     debugPrint('댓글 삭제 시작 - commentId: $commentId, postId: $postId, isReply: $isReply');
     
     try {
-      // 1. 댓글이 답글이 아닌 경우, 해당 댓글에 달린 답글들도 함께 삭제
-      if (!isReply) {
-        final repliesQuery = await _firestore
-            .collection('comments')
-            .where('replyToCommentId', isEqualTo: commentId)
-            .get();
+      await _firestore.runTransaction((transaction) async {
+        // 1. 삭제할 댓글 문서 가져오기
+        final commentRef = _firestore.collection('comments').doc(commentId);
+        final commentDoc = await transaction.get(commentRef);
         
-        final int repliesCount = repliesQuery.docs.length;
-        debugPrint('삭제할 댓글의 답글 수: $repliesCount개');
-        
-        // 답글 삭제
-        final batch = _firestore.batch();
-        for (final replyDoc in repliesQuery.docs) {
-          batch.delete(replyDoc.reference);
+        if (!commentDoc.exists) {
+          throw Exception('댓글이 존재하지 않습니다');
         }
         
-        // 댓글 문서 삭제
-        batch.delete(_firestore.collection('comments').doc(commentId));
+        // 2. 게시물 문서 가져오기
+        final postRef = _firestore.collection('posts').doc(postId);
+        final postDoc = await transaction.get(postRef);
         
-        // 배치 실행
-        await batch.commit();
-        debugPrint('댓글 및 답글 삭제 완료');
+        if (!postDoc.exists) {
+          throw Exception('게시물이 존재하지 않습니다');
+        }
         
-        // 게시물 댓글 카운트 업데이트 (1차 댓글만 카운트에 반영)
-        await _updatePostCommentCount(postId, -1);
-      } else {
-        // 2. 답글인 경우, 해당 답글만 삭제
-        await _firestore.collection('comments').doc(commentId).delete();
-        debugPrint('답글 삭제 완료');
-      }
+        // 3. 삭제할 댓글 수 계산
+        int commentsToDelete = 1; // 기본적으로 자기 자신
+        
+        // 답글이 아닌 경우, 해당 댓글의 답글들도 카운트
+        if (!isReply) {
+          final repliesQuery = await _firestore
+              .collection('comments')
+              .where('replyToCommentId', isEqualTo: commentId)
+              .get();
+          
+          commentsToDelete += repliesQuery.docs.length;
+          debugPrint('삭제할 답글 수: ${repliesQuery.docs.length}개');
+          
+          // 답글들 삭제
+          for (final replyDoc in repliesQuery.docs) {
+            transaction.delete(replyDoc.reference);
+          }
+        }
+        
+        // 4. 댓글 문서 삭제
+        transaction.delete(commentRef);
+        
+        // 5. 게시물 댓글 수 업데이트 (모든 삭제된 댓글 수만큼 감소)
+        final currentCount = postDoc.data()?['commentsCount'] ?? 0;
+        final newCount = (currentCount - commentsToDelete).clamp(0, double.infinity).toInt();
+        
+        transaction.update(postRef, {
+          'commentsCount': newCount,
+        });
+        
+        debugPrint('트랜잭션 완료: 댓글 $commentsToDelete개 삭제, 카운트 $currentCount → $newCount');
+      });
       
       debugPrint('댓글 삭제 완료');
     } catch (e) {
       debugPrint('댓글 삭제 실패: $e');
       rethrow;
-    }
-  }
-  
-  // 게시물 댓글 수 업데이트 헬퍼 메서드
-  Future<void> _updatePostCommentCount(String postId, int increment) async {
-    try {
-      final postRef = _firestore.collection('posts').doc(postId);
-      final postDoc = await postRef.get();
-      
-      if (postDoc.exists) {
-        final int currentCount = postDoc.data()?['commentsCount'] ?? 0;
-        final int newCount = (currentCount + increment) < 0 ? 0 : currentCount + increment;
-        
-        await postRef.update({'commentsCount': newCount});
-        debugPrint('게시물 댓글 수 업데이트: $newCount');
-      } else {
-        debugPrint('게시물이 존재하지 않음: $postId');
-      }
-    } catch (e) {
-      debugPrint('게시물 댓글 수 업데이트 실패: $e');
-      // 실패해도 주요 기능에 영향을 주지 않도록 오류를 전파하지 않음
     }
   }
   

@@ -11,6 +11,7 @@ import 'home_screen.dart';
 import 'hashtag_explore_screen.dart';
 import '../profile/profile_screen.dart';
 
+
 // 하단 탭 인덱스를 저장하는 프로바이더
 final bottomNavIndexProvider = StateProvider<int>((ref) => 0);
 
@@ -66,8 +67,8 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
           // 사용자 정보 갱신
           final refresh1 = ref.refresh(currentUserProvider);
           
-          // 사용자 프로필 갱신 - getProfileProvider 사용으로 변경
-          final refresh2 = ref.refresh(getProfileProvider(user.uid));
+          // 사용자 프로필 갱신 - 
+          final refresh2 = ref.refresh(getUserProfileProvider(user.uid));
           
           // 사용자 게시물 리스트 갱신
           final refresh3 = ref.refresh(userPostsProvider(user.uid));
