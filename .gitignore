@@ -12,6 +12,7 @@
 .swiftpm/
 migrate_working_dir/
 firebase_service.dart
+my-keystore.jks
 
 # IntelliJ related
 *.iml

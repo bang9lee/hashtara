@@ -47,34 +47,47 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
     _refreshAllData();
   }
   
-  // 모든 관련 데이터 갱신 메소드
+  // 모든 관련 데이터 갱신 메소드 - 권한 오류 방지 추가
   void _refreshAllData() {
     debugPrint('모든 데이터 갱신 중...');
+    
+    // 🔥 강제 로그아웃 상태면 데이터 갱신 중단
+    final forceLogout = ref.read(forceLogoutProvider);
+    if (forceLogout) {
+      debugPrint('🔥 강제 로그아웃 상태 - 데이터 갱신 중단');
+      return;
+    }
     
     // 현재 인증된 사용자가 있는지 확인
     final authState = ref.read(authStateProvider);
     authState.whenData((user) {
       if (user != null) {
-        // 사용자 정보 갱신
-        final refresh1 = ref.refresh(currentUserProvider);
-        
-        // 사용자 프로필 갱신 - getProfileProvider 사용으로 변경
-        final refresh2 = ref.refresh(getProfileProvider(user.uid));
-        
-        // 사용자 게시물 리스트 갱신
-        final refresh3 = ref.refresh(userPostsProvider(user.uid));
-        
-        // 채팅 관련 데이터 갱신
-        final refresh4 = ref.refresh(userChatsProvider(user.uid));
-        final refresh5 = ref.refresh(unreadMessagesCountProvider(user.uid));
-        
-        // Lint 경고 제거를 위한 사용
-        debugPrint('Provider 갱신 완료: ${refresh1.hashCode}, ${refresh2.hashCode}, ${refresh3.hashCode}, ${refresh4.hashCode}, ${refresh5.hashCode}');
-        
-        // 프로필 정보 명시적 로딩
-        ref.read(profileControllerProvider.notifier).loadProfile(user.uid);
-        
-        debugPrint('사용자 ${user.uid} 데이터 갱신 완료');
+        try {
+          // 사용자 정보 갱신
+          final refresh1 = ref.refresh(currentUserProvider);
+          
+          // 사용자 프로필 갱신 - getProfileProvider 사용으로 변경
+          final refresh2 = ref.refresh(getProfileProvider(user.uid));
+          
+          // 사용자 게시물 리스트 갱신
+          final refresh3 = ref.refresh(userPostsProvider(user.uid));
+          
+          // 채팅 관련 데이터 갱신
+          final refresh4 = ref.refresh(userChatsProvider(user.uid));
+          final refresh5 = ref.refresh(unreadMessagesCountProvider(user.uid));
+          
+          // Lint 경고 제거를 위한 사용
+          debugPrint('Provider 갱신 완료: ${refresh1.hashCode}, ${refresh2.hashCode}, ${refresh3.hashCode}, ${refresh4.hashCode}, ${refresh5.hashCode}');
+          
+          // 프로필 정보 명시적 로딩
+          ref.read(profileControllerProvider.notifier).loadProfile(user.uid);
+          
+          debugPrint('사용자 ${user.uid} 데이터 갱신 완료');
+        } catch (e) {
+          debugPrint('🔥 데이터 갱신 중 오류 (무시): $e');
+        }
+      } else {
+        debugPrint('🔥 로그인된 사용자가 없음 - 데이터 갱신 건너뜀');
       }
     });
   }

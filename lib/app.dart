@@ -8,7 +8,7 @@ import 'views/profile/setup_profile_screen.dart';
 import 'views/auth/terms_agreement_screen.dart';
 import 'views/feed/main_tab_screen.dart';
 import 'providers/auth_provider.dart';
-import 'services/notification_service.dart'; 
+import 'services/notification_service.dart';
 
 // main.dart의 navigatorKey 가져오기
 import 'main.dart' as main_file;
@@ -37,15 +37,22 @@ class HashtaraApp extends ConsumerStatefulWidget {
   ConsumerState<HashtaraApp> createState() => _HashtaraAppState();
 }
 
-class _HashtaraAppState extends ConsumerState<HashtaraApp> {
+class _HashtaraAppState extends ConsumerState<HashtaraApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     
     // 앱 시작 시 간단한 초기화
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeApp();
     });
+  }
+  
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
   
   // 간단한 앱 초기화
@@ -68,16 +75,17 @@ class _HashtaraAppState extends ConsumerState<HashtaraApp> {
 
   @override
   Widget build(BuildContext context) {
-    // 🔥 핵심 수정: authStateProvider를 직접 감시하여 즉시 반응
+    // 🔥 강제 로그아웃 플래그 감시 - 개선된 로직
+    final forceLogout = ref.watch(forceLogoutProvider);
     final authState = ref.watch(authStateProvider);
     final signupProgress = ref.watch(signupProgressProvider);
     
     // 디버그 로그 추가
-    debugPrint('HashtaraApp 리빌드됨 - AuthState: ${authState.runtimeType}, 진행상태: $signupProgress');
+    debugPrint('HashtaraApp 리빌드됨 - AuthState: ${authState.runtimeType}, 진행상태: $signupProgress, 강제로그아웃: $forceLogout');
     
     return CupertinoApp(
       title: 'Hashtara',
-      navigatorKey: main_file.navigatorKey, // 글로벌 네비게이터 키 추가
+      navigatorKey: main_file.navigatorKey,
       theme: const CupertinoThemeData(
         primaryColor: AppColors.primaryPurple,
         brightness: Brightness.dark,
@@ -99,35 +107,40 @@ class _HashtaraAppState extends ConsumerState<HashtaraApp> {
       ],
       debugShowCheckedModeBanner: false,
       navigatorObservers: [
-        // 네비게이션 디버깅을 위한 observer 추가
         NavigationLogger(),
       ],
-      // 명시적 라우트 정의 추가
+      
+      // 🔥 수정: home 제거하고 initialRoute 사용
+      initialRoute: '/',
+      
+      // 🔥 수정: routes에서 모든 라우트 정의
+      routes: {
+        '/': (context) => _buildHome(),
+        '/login': (context) => const LoginScreen(),
+        '/splash': (context) => const SplashScreen(),
+      },
+      
+      // 동적 라우트 처리
       onGenerateRoute: (settings) {
         debugPrint('라우트 생성: ${settings.name}');
         
-        // 라우트 이름 파싱
         final uri = Uri.parse(settings.name ?? '/');
         final pathSegments = uri.pathSegments;
         
-        // 동적 라우트 처리
         if (pathSegments.isNotEmpty) {
           if (pathSegments[0] == 'post' && pathSegments.length > 1) {
-            // 게시물 상세 화면 라우트
             final postId = pathSegments[1];
             return CupertinoPageRoute(
               settings: settings,
               builder: (context) => PostDetailScreen(postId: postId),
             );
           } else if (pathSegments[0] == 'profile' && pathSegments.length > 1) {
-            // 프로필 화면 라우트
             final userId = pathSegments[1];
             return CupertinoPageRoute(
               settings: settings,
               builder: (context) => ProfileScreen(userId: userId),
             );
           } else if (pathSegments[0] == 'chat' && pathSegments.length > 1) {
-            // 채팅 상세 화면 라우트
             final chatId = pathSegments[1];
             return CupertinoPageRoute(
               settings: settings,
@@ -136,69 +149,97 @@ class _HashtaraAppState extends ConsumerState<HashtaraApp> {
           }
         }
         
-        // 기본 라우트
         return null;
       },
-      // 🔥 핵심 수정: authState를 직접 사용하여 즉시 반응하도록 수정
-      home: authState.when(
-        data: (user) {
-          debugPrint('🔥 AuthState 데이터 수신: user=${user?.uid}');
+    );
+  }
+  
+  // 🔥 홈 화면 빌드 로직 - 강제 로그아웃 우선 처리
+  Widget _buildHome() {
+    final forceLogout = ref.watch(forceLogoutProvider);
+    final authState = ref.watch(authStateProvider);
+    final signupProgress = ref.watch(signupProgressProvider);
+    
+    // 디버그 로그 추가
+    debugPrint('HashtaraApp 리빌드됨 - AuthState: ${authState.runtimeType}, 진행상태: $signupProgress, 강제로그아웃: $forceLogout');
+    
+    // 🔥🔥🔥 강제 로그아웃 최우선 처리 - 다른 모든 로직보다 우선
+    if (forceLogout) {
+      debugPrint('🔥🔥🔥 강제 로그아웃 상태 감지 → 무조건 로그인 화면');
+      
+      // 🔥 플래그 리셋을 즉시 실행하되 안전하게 처리
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (mounted) {
+              debugPrint('🔥 forceLogout 플래그 리셋');
+              ref.read(forceLogoutProvider.notifier).state = false;
+            }
+          });
+        }
+      });
+      
+      return const LoginScreen();
+    }
+    
+    // 🔥 기존 로직: authState 처리
+    return authState.when(
+      data: (user) {
+        debugPrint('🔥 AuthState 데이터 수신: user=${user?.uid}');
+        
+        if (user == null) {
+          debugPrint('🔥 사용자 로그인되지 않음, 로그인 화면으로 이동');
+          return const LoginScreen();
+        } else {
+          debugPrint('✅ 로그인된 사용자 확인: ${user.uid}');
           
-          if (user == null) {
-            debugPrint('🔥 사용자 로그인되지 않음, 로그인 화면으로 이동');
-            return const LoginScreen(); // 🔥 바로 로그인 화면 반환
-          } else {
-            debugPrint('✅ 로그인된 사용자 확인: ${user.uid}');
-            
-            // currentUserProvider 감시 (사용자 문서 존재 여부 확인용)
-            final currentUserAsync = ref.watch(currentUserProvider);
-            
-            return currentUserAsync.when(
-              data: (userModel) {
-                debugPrint('🔥 CurrentUser 데이터: ${userModel?.id}');
+          final currentUserAsync = ref.watch(currentUserProvider);
+          
+          return currentUserAsync.when(
+            data: (userModel) {
+              debugPrint('🔥 CurrentUser 데이터: ${userModel?.id}');
+              
+              if (userModel == null) {
+                debugPrint('🔥 사용자 모델이 null - 회원가입 프로세스 확인');
                 
-                // 사용자 모델이 null이면 회원가입 프로세스 진행
-                if (userModel == null) {
-                  debugPrint('🔥 사용자 모델이 null - 회원가입 프로세스 확인');
-                  
-                  // 현재 회원가입 진행 상태에 따라 화면 결정
-                  switch (signupProgress) {
-                    case SignupProgress.registered:
-                      debugPrint('➡️ 약관 동의 필요: ${user.uid}');
-                      return TermsAgreementScreen(userId: user.uid);
-                    case SignupProgress.termsAgreed:
-                      debugPrint('➡️ 프로필 설정 필요: ${user.uid}');
-                      return SetupProfileScreen(userId: user.uid);
-                    case SignupProgress.completed:
-                    case SignupProgress.none:
-                      debugPrint('🔥 알 수 없는 상태 - 로그인 화면으로');
-                      return const LoginScreen();
-                  }
-                } else {
-                  debugPrint('➡️ 기존 사용자 - 메인 화면으로 이동');
-                  return const MainTabScreen();
+                switch (signupProgress) {
+                  case SignupProgress.registered:
+                    debugPrint('➡️ 약관 동의 필요: ${user.uid}');
+                    return TermsAgreementScreen(userId: user.uid);
+                  case SignupProgress.termsAgreed:
+                    debugPrint('➡️ 프로필 설정 필요: ${user.uid}');
+                    return SetupProfileScreen(userId: user.uid);
+                  case SignupProgress.completed:
+                    debugPrint('➡️ 완료된 사용자인데 userModel이 null - 메인 화면으로');
+                    return const MainTabScreen();
+                  case SignupProgress.none:
+                    debugPrint('🔥 진행 상태가 없음 - 로그인 화면으로');
+                    return const LoginScreen();
                 }
-              },
-              loading: () {
-                debugPrint('🔥 CurrentUser 로딩 중...');
-                return const SplashScreen();
-              },
-              error: (error, stack) {
-                debugPrint('🔥 CurrentUser 에러: $error');
-                return const LoginScreen(); // 🔥 에러 시 바로 로그인 화면
-              },
-            );
-          }
-        },
-        loading: () {
-          debugPrint('🔥 AuthState 로딩 중...');
-          return const SplashScreen();
-        },
-        error: (error, stack) {
-          debugPrint('🔥 AuthState 에러: $error');
-          return const LoginScreen(); // 🔥 에러 시 바로 로그인 화면
-        },
-      ),
+              } else {
+                debugPrint('➡️ 기존 사용자 - 메인 화면으로 이동');
+                return const MainTabScreen();
+              }
+            },
+            loading: () {
+              debugPrint('🔥 CurrentUser 로딩 중...');
+              return const SplashScreen();
+            },
+            error: (error, stack) {
+              debugPrint('🔥 CurrentUser 에러: $error');
+              return const LoginScreen();
+            },
+          );
+        }
+      },
+      loading: () {
+        debugPrint('🔥 AuthState 로딩 중...');
+        return const SplashScreen();
+      },
+      error: (error, stack) {
+        debugPrint('🔥 AuthState 에러: $error');
+        return const LoginScreen();
+      },
     );
   }
 }
@@ -230,7 +271,7 @@ class NavigationLogger extends NavigatorObserver {
   }
 }
 
-// 임시 화면 위젯들 (실제 앱에 맞게 구현 필요)
+// 임시 화면 위젯들
 class PostDetailScreen extends StatelessWidget {
   final String postId;
   

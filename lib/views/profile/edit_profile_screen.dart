@@ -1,6 +1,5 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // Firebase Auth 직접 사용을 위해 추가
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import '../../../constants/app_colors.dart';
@@ -267,53 +266,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     );
   }
   
-  // 🔥 완전히 새로운 로그아웃 처리 함수 - Firebase Auth 직접 사용
-  Future<void> _handleLogout() async {
-    showCupertinoDialog(
-      context: context,
-      builder: (dialogContext) => CupertinoAlertDialog(
-        title: const Text('로그아웃'),
-        content: const Text('정말 로그아웃 하시겠습니까?'),
-        actions: [
-          CupertinoDialogAction(
-            child: const Text('취소'),
-            onPressed: () => Navigator.of(dialogContext).pop(),
-          ),
-          CupertinoDialogAction(
-            isDestructiveAction: true,
-            onPressed: () {
-              // 다이얼로그 닫기
-              Navigator.of(dialogContext).pop();
-              
-              debugPrint('🔥🔥🔥 즉시 로그아웃 및 네비게이션');
-              
-              // 🔥 즉시 Firebase에서 로그아웃 (프로바이더 거치지 않고)
-              try {
-                FirebaseAuth.instance.signOut();
-                debugPrint('🔥 Firebase 직접 로그아웃 완료');
-              } catch (e) {
-                debugPrint('🔥 Firebase 로그아웃 에러 무시: $e');
-              }
-              
-              // 🔥 즉시 로그인 화면으로 이동
-              if (main_file.navigatorKey.currentState != null) {
-                main_file.navigatorKey.currentState!.pushAndRemoveUntil(
-                  CupertinoPageRoute(
-                    builder: (context) => const LoginScreen(),
-                  ),
-                  (route) => false, // 모든 이전 화면 제거
-                );
-                debugPrint('🔥 즉시 로그인 화면 이동 완료');
-              }
-            },
-            child: const Text('로그아웃'),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  // 🔥 완전히 새로운 회원 탈퇴 함수 - Firebase Auth 직접 사용
+  // 🔥 회원 탈퇴 함수 - 프로필 편집에서 처리
   Future<void> _handleDeleteAccount() async {
     showCupertinoDialog(
       context: context,
@@ -330,29 +283,88 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
           ),
           CupertinoDialogAction(
             isDestructiveAction: true,
-            onPressed: () {
-              // 다이얼로그 닫기
-              Navigator.of(dialogContext).pop();
+            onPressed: () async {
+              Navigator.of(dialogContext).pop(); // 다이얼로그 먼저 닫기
               
-              debugPrint('🔥🔥🔥 즉시 회원탈퇴 및 네비게이션');
+              if (!mounted) return;
               
-              // 🔥 즉시 Firebase에서 로그아웃 (프로바이더 거치지 않고)
+              // 로딩 상태로 변경
+              setState(() {
+                _isLoading = true;
+                _errorMessage = null;
+              });
+              
+              debugPrint('🔥🔥🔥 회원탈퇴 처리 시작 (프로필 편집에서)');
+              
               try {
-                FirebaseAuth.instance.signOut();
-                debugPrint('🔥 Firebase 직접 로그아웃 완료');
+                // 🔥 1단계: 강제 로그아웃 플래그 설정 (가장 먼저!)
+                ref.read(forceLogoutProvider.notifier).state = true;
+                debugPrint('🔥 강제 로그아웃 플래그 설정 완료');
+                
+                // 🔥 2단계: 상태 초기화
+                ref.read(signupProgressProvider.notifier).state = SignupProgress.none;
+                await clearSignupProgress();
+                debugPrint('🔥 상태 초기화 완료');
+                
+                // 🔥 3단계: 즉시 로그인 화면으로 네비게이션 (회원탈퇴 전에!)
+                if (main_file.navigatorKey.currentState != null) {
+                  main_file.navigatorKey.currentState!.pushNamedAndRemoveUntil(
+                    '/login',
+                    (route) => false, // 모든 이전 화면 제거
+                  );
+                  debugPrint('🔥 즉시 로그인 화면 이동 완료');
+                } else if (mounted) {
+                  Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+                    CupertinoPageRoute(
+                      builder: (context) => const LoginScreen(),
+                    ),
+                    (route) => false,
+                  );
+                  debugPrint('🔥 로컬 네비게이터로 로그인 화면 이동 완료');
+                }
+                
+                // 🔥 4단계: 백그라운드에서 회원탈퇴 처리
+                ref.read(authControllerProvider.notifier).deleteAccount().catchError((e) {
+                  debugPrint('🔥 백그라운드 회원탈퇴 에러 (무시): $e');
+                });
+                
+                // 🔥 5단계: Provider 무효화 (백그라운드)
+                Future.delayed(const Duration(milliseconds: 100), () {
+                  try {
+                    ref.invalidate(currentUserProvider);
+                    ref.invalidate(authStateProvider);
+                    debugPrint('🔥 백그라운드 프로바이더 무효화 완료');
+                  } catch (e) {
+                    debugPrint('🔥 백그라운드 프로바이더 무효화 에러 (무시): $e');
+                  }
+                });
+                
+                debugPrint('🔥🔥🔥 회원탈퇴 처리 완료 (프로필 편집에서)');
+                
               } catch (e) {
-                debugPrint('🔥 Firebase 로그아웃 에러 무시: $e');
-              }
-              
-              // 🔥 즉시 로그인 화면으로 이동
-              if (main_file.navigatorKey.currentState != null) {
-                main_file.navigatorKey.currentState!.pushAndRemoveUntil(
-                  CupertinoPageRoute(
-                    builder: (context) => const LoginScreen(),
-                  ),
-                  (route) => false, // 모든 이전 화면 제거
-                );
-                debugPrint('🔥 즉시 로그인 화면 이동 완료');
+                debugPrint('🔥 회원탈퇴 처리 실패: $e');
+                
+                // 실패해도 강제로 로그인 화면으로 이동
+                if (main_file.navigatorKey.currentState != null) {
+                  main_file.navigatorKey.currentState!.pushNamedAndRemoveUntil(
+                    '/login',
+                    (route) => false,
+                  );
+                } else if (mounted) {
+                  Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+                    CupertinoPageRoute(
+                      builder: (context) => const LoginScreen(),
+                    ),
+                    (route) => false,
+                  );
+                }
+              } finally {
+                // 로딩 상태 해제 (mounted 체크)
+                if (mounted) {
+                  setState(() {
+                    _isLoading = false;
+                  });
+                }
               }
             },
             child: const Text('회원탈퇴'),
@@ -421,6 +433,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                   ),
                 ),
               ),
+
               const SizedBox(height: 8),
               Center(
                 child: CupertinoButton(
@@ -597,7 +610,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                   ),
                 ),
               
-              // 알림 설정 섹션 (새로 추가)
+              // 알림 설정 섹션
               const SizedBox(height: 32),
               const _SettingHeader(title: '설정'),
               const SizedBox(height: 12),
@@ -613,36 +626,17 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 onTap: _navigateToNotificationSettings,
               ),
               
-              // 로그아웃 및 회원탈퇴 섹션
+              // 계정 관리 섹션
               const SizedBox(height: 32),
               const _SettingHeader(title: '계정'),
               const SizedBox(height: 12),
               
-              // 로그아웃 버튼
-              SizedBox(
-                width: double.infinity,
-                child: CupertinoButton(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  color: CupertinoColors.systemRed,
-                  borderRadius: BorderRadius.circular(8),
-                  onPressed: _handleLogout,
-                  child: const Text(
-                    '로그아웃',
-                    style: TextStyle(
-                      color: CupertinoColors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-              
-              // 회원탈퇴 버튼 (추가)
-              const SizedBox(height: 16),
+              // 회원탈퇴 버튼
               SizedBox(
                 width: double.infinity,
                 child: CupertinoButton(
                   padding: EdgeInsets.zero,
-                  onPressed: _handleDeleteAccount,
+                  onPressed: _isLoading ? null : _handleDeleteAccount,
                   child: const Text(
                     '회원탈퇴',
                     style: TextStyle(

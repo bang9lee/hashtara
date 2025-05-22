@@ -97,7 +97,7 @@ class _PostDetailScreenState extends ConsumerState<PostDetailScreen> {
     return CupertinoPageScaffold(
       backgroundColor: AppColors.darkBackground,
       navigationBar: const CupertinoNavigationBar(
-        backgroundColor: AppColors.primaryPurple,
+        backgroundColor: Color.fromARGB(0, 124, 95, 255),
         border: Border(
           bottom: BorderSide(color: AppColors.separator),
         ),

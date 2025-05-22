@@ -124,6 +124,10 @@ class CommentController extends StateNotifier<AsyncValue<void>> {
       // 게시물 정보도 새로고침 (commentsCount 업데이트 반영)
       _ref.invalidate(postDetailProvider(postId));
       
+      // 🔥 피드 프로바이더도 새로고침 (홈 화면 댓글 수 업데이트)
+      _ref.invalidate(feedPostsProvider);
+      debugPrint('🔥 댓글 삭제 후 피드 프로바이더 갱신 완료');
+      
       state = const AsyncValue.data(null);
     } catch (e, stack) {
       debugPrint('댓글 삭제 실패: $e');
@@ -131,7 +135,7 @@ class CommentController extends StateNotifier<AsyncValue<void>> {
     }
   }
   
-  // 관련 스트림 프로바이더 무효화
+  // 관련 스트림 프로바이더 무효화 - 피드 갱신 추가
   void _invalidateCommentStreams(String postId, String? replyToCommentId) {
     debugPrint('댓글 스트림 새로고침 - postId: $postId');
     
@@ -145,5 +149,9 @@ class CommentController extends StateNotifier<AsyncValue<void>> {
     
     // 게시물 상세 정보 프로바이더 (댓글 수 표시용)
     _ref.invalidate(postDetailProvider(postId));
+    
+    // 🔥 피드 프로바이더도 새로고침 (홈 화면 댓글 수 업데이트)
+    _ref.invalidate(feedPostsProvider);
+    debugPrint('🔥 피드 프로바이더 갱신 완료');
   }
 }

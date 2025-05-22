@@ -666,7 +666,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
                       ),
                       child: CupertinoTextField(
                         controller: _usernameController,
-                        placeholder: '사용자명을 입력하세요 (예: user123)',
+                        placeholder: '사용자명을 입력하세요',
                         maxLength: _maxUsernameLength,
                         prefix: const Padding(
                           padding: EdgeInsets.only(left: 16),

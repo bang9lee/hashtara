@@ -16,6 +16,7 @@ enum AuthErrorType {
   operationNotAllowed,
   weakPassword,
   networkError,
+  requiresRecentLogin, // 🔥 추가
   unknown
 }
 
@@ -84,9 +85,9 @@ class AuthErrorHandler {
             message: '보안에 취약한 비밀번호입니다. 더 강력한 비밀번호를 사용해주세요.',
             originalError: e,
           );
-        case 'requires-recent-login':
+        case 'requires-recent-login': // 🔥 추가
           return AuthException(
-            type: AuthErrorType.invalidCredential,
+            type: AuthErrorType.requiresRecentLogin,
             message: '보안상 중요한 작업입니다. 다시 로그인 후 시도해주세요.',
             originalError: e,
           );
@@ -365,13 +366,13 @@ class AuthRepository {
       _logger.e('프로필 완료 상태 업데이트 실패: $e');
       throw AuthException(
         type: AuthErrorType.unknown, 
-        message: '프로필 완료 상태를 업데이트하는 중 오료가 발생했습니다.', 
+        message: '프로필 완료 상태를 업데이트하는 중 오류가 발생했습니다.', 
         originalError: e
       );
     }
   }
 
-  // 🔥 완전히 새로운 회원 탈퇴 메서드 - 데이터 먼저 삭제, Auth는 나중에
+  // 🔥 완전히 새로운 회원 탈퇴 메서드 - requires-recent-login 오류 처리 강화
   Future<void> deleteAccount() async {
     final user = _auth.currentUser;
     if (user == null) { 
@@ -382,7 +383,7 @@ class AuthRepository {
     }
     
     final userId = user.uid;
-    _logger.i('회원 탈퇴 시작: $userId');
+    _logger.i('🔥 회원 탈퇴 시작: $userId');
     
     // 단계별로 진행하되, 각 단계가 실패해도 다음 단계는 진행
     List<String> errors = [];
@@ -440,41 +441,70 @@ class AuthRepository {
     }
     
     try {
-      // 6단계: Firebase Auth 계정 삭제 (가장 마지막!)
+      // 🔥 6단계: Firebase Auth 계정 삭제 (requires-recent-login 오류 처리)
       _logger.i('6단계: Firebase Auth 계정 삭제 시작');
       await user.delete();
       authDeleted = true;
-      _logger.i('Firebase Auth 계정 삭제 성공');
+      _logger.i('🔥✅ Firebase Auth 계정 삭제 성공!');
     } catch (e) {
       _logger.e('Firebase Auth 계정 삭제 실패: $e');
-      errors.add('Auth 삭제 실패: $e');
       
-      // requires-recent-login 에러인 경우 특별 처리
-      if (e is FirebaseAuthException && e.code == 'requires-recent-login') {
-        _logger.w('최근 로그인 필요 에러 - 강제 로그아웃으로 처리');
+      if (e is FirebaseAuthException) {
+        if (e.code == 'requires-recent-login') {
+          _logger.w('🔥 requires-recent-login 오류 - 재인증 필요하지만 강제 로그아웃으로 처리');
+          
+          try {
+            // 재인증 대신 강제 로그아웃으로 처리
+            await signOut();
+            authDeleted = true; // 로그아웃도 계정 제거 효과
+            _logger.i('🔥 재인증 대신 강제 로그아웃 완료');
+            errors.add('재인증 필요로 강제 로그아웃 처리됨');
+          } catch (signOutError) {
+            _logger.e('강제 로그아웃도 실패: $signOutError');
+            errors.add('강제 로그아웃 실패: $signOutError');
+          }
+        } else {
+          _logger.e('Firebase Auth 기타 오류: ${e.code} - ${e.message}');
+          errors.add('Auth 삭제 실패: ${e.code}');
+          
+          // 다른 오류여도 강제 로그아웃 시도
+          try {
+            await signOut();
+            authDeleted = true;
+            _logger.i('다른 오류 후 강제 로그아웃 완료');
+          } catch (signOutError) {
+            _logger.e('오류 후 강제 로그아웃 실패: $signOutError');
+            errors.add('오류 후 강제 로그아웃 실패: $signOutError');
+          }
+        }
+      } else {
+        _logger.e('Firebase Auth 알 수 없는 오류: $e');
+        errors.add('Auth 삭제 알 수 없는 오류: $e');
+        
+        // 알 수 없는 오류여도 강제 로그아웃 시도
         try {
           await signOut();
-          authDeleted = true; // 로그아웃도 계정 제거 효과
-          _logger.i('강제 로그아웃 완료');
+          authDeleted = true;
+          _logger.i('알 수 없는 오류 후 강제 로그아웃 완료');
         } catch (signOutError) {
-          _logger.e('강제 로그아웃도 실패: $signOutError');
-          errors.add('강제 로그아웃 실패: $signOutError');
+          _logger.e('알 수 없는 오류 후 강제 로그아웃 실패: $signOutError');
+          errors.add('알 수 없는 오류 후 강제 로그아웃 실패: $signOutError');
         }
       }
     }
     
     // 결과 로깅
     if (errors.isEmpty) {
-      _logger.i('회원 탈퇴 완전 성공: $userId');
+      _logger.i('🔥✅ 회원 탈퇴 완전 성공: $userId');
     } else {
-      _logger.w('회원 탈퇴 부분 성공 (일부 오류): ${errors.join(', ')}');
+      _logger.w('🔥⚠️ 회원 탈퇴 부분 성공 (일부 오류): ${errors.join(', ')}');
     }
     
-    // Auth 삭제가 실패한 경우에만 예외 throw
+    // Auth 처리가 안된 경우에만 예외 throw
     if (!authDeleted) {
       throw AuthException(
-        type: AuthErrorType.unknown,
-        message: '계정 삭제 중 오류가 발생했습니다. 다시 로그인 후 시도해주세요.',
+        type: AuthErrorType.requiresRecentLogin,
+        message: '계정 삭제를 위해 다시 로그인이 필요합니다. 앱을 재시작하여 로그인해주세요.',
       );
     }
   }

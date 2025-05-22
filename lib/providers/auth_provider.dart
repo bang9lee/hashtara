@@ -5,6 +5,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../repositories/auth_repository.dart';
 import '../models/user_model.dart';
+import '../main.dart' as main_file;
+
+// 🔥 강제 로그아웃 플래그 추가
+final forceLogoutProvider = StateProvider<bool>((ref) => false);
 
 // 로컬 저장소 키 상수
 const String kSignupProgressKey = 'signup_progress_state';
@@ -118,15 +122,6 @@ final currentUserProvider = FutureProvider<UserModel?>((ref) async {
       
       debugPrint('🔥 로그인된 사용자: ${user.uid}');
       
-      // 탈퇴 계정 체크
-      final isDeleted = await isAccountDeleted(user.uid);
-      if (isDeleted) {
-        debugPrint('🔥 탈퇴 계정 감지, 강제 로그아웃');
-        await FirebaseAuth.instance.signOut();
-        await clearDeletedAccountFlag();
-        return null;
-      }
-      
       // 🔥 사용자 문서 확인
       DocumentSnapshot? userDoc;
       try {
@@ -154,10 +149,55 @@ final currentUserProvider = FutureProvider<UserModel?>((ref) async {
         return null;
       }
       
-      final termsAgreed = userData['termsAgreed'] == true;
-      final profileComplete = userData['profileComplete'] == true;
+      // 🔥 필드 존재 여부 체크 및 기본값 처리
+      final termsAgreed = userData.containsKey('termsAgreed') ? userData['termsAgreed'] == true : false;
+      final profileComplete = userData.containsKey('profileComplete') ? userData['profileComplete'] == true : false;
       
-      debugPrint('🔥 기존 사용자 상태: 약관동의=$termsAgreed, 프로필완료=$profileComplete');
+      // 🔥 기본 사용자 정보 필드 체크
+      final hasBasicInfo = userData.containsKey('name') && 
+                          userData.containsKey('username') && 
+                          userData['name'] != null && 
+                          userData['username'] != null &&
+                          userData['name'].toString().isNotEmpty &&
+                          userData['username'].toString().isNotEmpty;
+      
+      debugPrint('🔥 기존 사용자 상태: 약관동의=$termsAgreed, 프로필완료=$profileComplete, 기본정보=$hasBasicInfo');
+      
+      // 🔥 새로운 로직: 기본 정보가 있으면서 필수 필드가 누락된 경우 자동 수정
+      if (hasBasicInfo && (!termsAgreed || !profileComplete)) {
+        debugPrint('🔥🔥🔥 기본 정보는 있지만 필수 필드 누락 - 자동 수정 시작');
+        try {
+          // 누락된 필드들을 자동으로 true로 설정
+          final updateData = <String, dynamic>{};
+          
+          if (!termsAgreed) {
+            updateData['termsAgreed'] = true;
+            updateData['privacyAgreed'] = true;
+            updateData['agreementDate'] = FieldValue.serverTimestamp();
+          }
+          
+          if (!profileComplete) {
+            updateData['profileComplete'] = true;
+            updateData['profileSetupDate'] = FieldValue.serverTimestamp();
+          }
+          
+          await repository.firestore.collection('users').doc(user.uid).update(updateData);
+          debugPrint('🔥 누락된 필드 자동 수정 완료: ${updateData.keys.join(', ')}');
+          
+          // 상태 업데이트
+          ref.read(signupProgressProvider.notifier).state = SignupProgress.completed;
+          await saveSignupProgress(SignupProgress.completed, user.uid);
+          
+          // 사용자 모델 로드
+          final userModel = await repository.getUserProfile(user.uid);
+          if (userModel != null) {
+            debugPrint('🔥🔥🔥 자동 수정 후 사용자 모델 로드 성공: ${userModel.id}');
+            return userModel;
+          }
+        } catch (e) {
+          debugPrint('🔥 필드 자동 수정 실패: $e');
+        }
+      }
       
       // 약관 동의가 안된 경우
       if (!termsAgreed) {
@@ -167,8 +207,8 @@ final currentUserProvider = FutureProvider<UserModel?>((ref) async {
         return null;
       }
       
-      // 프로필 설정이 안된 경우
-      if (!profileComplete) {
+      // 프로필 설정이 안된 경우 (기본 정보 없음)
+      if (!profileComplete || !hasBasicInfo) {
         debugPrint('🔥 프로필 설정 필요');
         ref.read(signupProgressProvider.notifier).state = SignupProgress.termsAgreed;
         await saveSignupProgress(SignupProgress.termsAgreed, user.uid);
@@ -411,43 +451,70 @@ class AuthController extends StateNotifier<AsyncValue<void>> {
     }
   }
   
-  // 강력한 로그아웃
+  // 🔥🔥🔥 강화된 로그아웃 메서드
   Future<void> signOut() async {
     state = const AsyncValue.loading();
     
     try {
-      debugPrint('🔥🔥🔥 강력한 로그아웃 시작');
+      debugPrint('🚪 강화된 로그아웃 시작');
       
+      // 1. 강제 로그아웃 플래그 설정 (가장 먼저!)
+      _ref.read(forceLogoutProvider.notifier).state = true;
+      
+      // 2. 상태 초기화
       _ref.read(signupProgressProvider.notifier).state = SignupProgress.none;
       await clearSignupProgress();
       
+      // 3. Firebase 로그아웃
       await _repository.signOut();
       
+      // 4. Provider 무효화
       _ref.invalidate(currentUserProvider);
       _ref.invalidate(authStateProvider);
       
+      // 5. 네비게이션 스택 완전 초기화
+      final navigatorKey = main_file.navigatorKey;
+      if (navigatorKey.currentContext != null) {
+        Navigator.of(navigatorKey.currentContext!).pushNamedAndRemoveUntil(
+          '/login',
+          (route) => false,
+        );
+        debugPrint('✅ 네비게이션 스택 초기화 완료');
+      }
+      
+      // 6. 약간의 지연 후 추가 갱신
       await Future.delayed(const Duration(milliseconds: 100));
       _ref.invalidate(currentUserProvider);
       _ref.invalidate(authStateProvider);
       
       state = const AsyncValue.data(null);
-      debugPrint('🔥🔥🔥 강력한 로그아웃 완료');
+      debugPrint('🚪 강화된 로그아웃 완료');
       
     } catch (e, stack) {
-      debugPrint('🔥🔥🔥 로그아웃 실패: $e');
+      debugPrint('❌ 로그아웃 실패: $e');
       
+      // 실패해도 강제로 처리
       try {
+        _ref.read(forceLogoutProvider.notifier).state = true;
         _ref.read(signupProgressProvider.notifier).state = SignupProgress.none;
         await clearSignupProgress();
         _ref.invalidate(currentUserProvider);
         _ref.invalidate(authStateProvider);
+        
+        final navigatorKey = main_file.navigatorKey;
+        if (navigatorKey.currentContext != null) {
+          Navigator.of(navigatorKey.currentContext!).pushNamedAndRemoveUntil(
+            '/login',
+            (route) => false,
+          );
+        }
       } catch (_) {}
       
       state = AsyncValue.error(e, stack);
     }
   }
   
-  // 회원 탈퇴
+  // 🔥 완전히 새로운 회원 탈퇴 - 탈퇴 플래그 체크 제거
   Future<void> deleteAccount() async {
     state = const AsyncValue.loading();
     
@@ -455,48 +522,160 @@ class AuthController extends StateNotifier<AsyncValue<void>> {
     String? userId = user?.uid;
     
     try {
-      debugPrint('🔥 회원 탈퇴 시도: $userId');
+      debugPrint('🔥🔥🔥 회원 탈퇴 시도: $userId');
       
-      if (userId != null) {
-        await markAccountAsDeleted(userId);
+      if (user == null) {
+        throw Exception('로그인된 사용자가 없습니다.');
       }
       
+      // 🔥 1단계: Firebase Auth 계정 삭제 (가장 먼저!)
+      bool authDeleted = false;
+      try {
+        debugPrint('🔥 Firebase Auth 계정 삭제 시도...');
+        await user.delete(); // user 객체가 유효할 때 바로 삭제
+        authDeleted = true;
+        debugPrint('🔥✅ Firebase Auth 계정 삭제 성공!');
+      } catch (e) {
+        debugPrint('🔥 Firebase Auth 계정 삭제 실패: $e');
+        
+        // requires-recent-login 오류인지 확인
+        if (e is FirebaseAuthException && e.code == 'requires-recent-login') {
+          debugPrint('🔥 requires-recent-login 오류 - 재인증 필요하지만 계속 진행');
+          // 재인증은 복잡하므로 일단 계속 진행
+        } else {
+          debugPrint('🔥 기타 Auth 삭제 오류: $e');
+        }
+      }
+      
+      // 🔥 2단계: 탈퇴 플래그 설정 (Auth 삭제 후)
+      if (userId != null) {
+        await markAccountAsDeleted(userId);
+        debugPrint('🔥 탈퇴 플래그 설정 완료');
+      }
+      
+      // 🔥 3단계: 로컬 상태 초기화
       await updateAndSaveSignupProgress(SignupProgress.none, null);
       _ref.invalidate(currentUserProvider);
       _ref.invalidate(authStateProvider);
+      debugPrint('🔥 로컬 상태 초기화 완료');
       
+      // 🔥 4단계: Firestore 데이터 삭제 (백그라운드)
       try {
-        await _repository.deleteAccount();
+        debugPrint('🔥 백그라운드 데이터 삭제 시작...');
+        
+        // 사용자별 데이터 삭제 (userId 사용)
+        if (userId != null) {
+          await _deleteUserDataByUserId(userId);
+        }
+        
+        debugPrint('🔥 백그라운드 데이터 삭제 완료');
       } catch (e) {
-        debugPrint('🔥 계정 삭제 실패하지만 계속 진행: $e');
+        debugPrint('🔥 백그라운드 데이터 삭제 실패 (무시): $e');
       }
       
-      try {
-        await _repository.signOut();
-      } catch (e) {
-        debugPrint('🔥 강제 로그아웃 실패: $e');
+      // 🔥 5단계: 강제 로그아웃 (Auth 삭제가 실패한 경우만)
+      if (!authDeleted) {
+        try {
+          await FirebaseAuth.instance.signOut();
+          debugPrint('🔥 Auth 삭제 실패 후 강제 로그아웃 완료');
+        } catch (e) {
+          debugPrint('🔥 강제 로그아웃도 실패: $e');
+        }
       }
       
+      // 🔥 6단계: 최종 상태 정리
       _ref.invalidate(currentUserProvider);
       _ref.invalidate(authStateProvider);
       
       state = const AsyncValue.data(null);
-      debugPrint('🔥 회원 탈퇴 완료');
+      debugPrint('🔥🔥🔥 회원 탈퇴 처리 완료 (Auth삭제: $authDeleted)');
       
     } catch (e, stack) {
-      debugPrint('🔥 회원 탈퇴 실패: $e');
+      debugPrint('🔥🔥🔥 회원 탈퇴 최종 실패: $e');
       
+      // 최종 실패해도 상태는 정리
       try {
         if (userId != null) {
           await markAccountAsDeleted(userId);
         }
         await updateAndSaveSignupProgress(SignupProgress.none, null);
-        await _repository.signOut();
+        await FirebaseAuth.instance.signOut();
         _ref.invalidate(currentUserProvider);
         _ref.invalidate(authStateProvider);
-      } catch (_) {}
+        debugPrint('🔥 실패 후 상태 정리 완료');
+      } catch (cleanupError) {
+        debugPrint('🔥 실패 후 상태 정리도 실패: $cleanupError');
+      }
       
       state = AsyncValue.error(e, stack);
+    }
+  }
+  
+  // 🔥 userId를 사용한 데이터 삭제 (로그아웃 후에도 가능)
+  Future<void> _deleteUserDataByUserId(String userId) async {
+    try {
+      debugPrint('🔥 사용자 데이터 삭제 시작: $userId');
+      
+      // 1. 사용자 게시물 삭제
+      try {
+        final postsQuery = await _repository.firestore
+            .collection('posts')
+            .where('userId', isEqualTo: userId)
+            .limit(50)
+            .get();
+        
+        if (postsQuery.docs.isNotEmpty) {
+          final batch = _repository.firestore.batch();
+          for (final doc in postsQuery.docs) {
+            batch.delete(doc.reference);
+          }
+          await batch.commit();
+          debugPrint('🔥 게시물 ${postsQuery.docs.length}개 삭제 완료');
+        }
+      } catch (e) {
+        debugPrint('🔥 게시물 삭제 실패: $e');
+      }
+      
+      // 2. 사용자 댓글 삭제
+      try {
+        final commentsQuery = await _repository.firestore
+            .collection('comments')
+            .where('userId', isEqualTo: userId)
+            .limit(50)
+            .get();
+        
+        if (commentsQuery.docs.isNotEmpty) {
+          final batch = _repository.firestore.batch();
+          for (final doc in commentsQuery.docs) {
+            batch.delete(doc.reference);
+          }
+          await batch.commit();
+          debugPrint('🔥 댓글 ${commentsQuery.docs.length}개 삭제 완료');
+        }
+      } catch (e) {
+        debugPrint('🔥 댓글 삭제 실패: $e');
+      }
+      
+      // 3. 사용자 문서 삭제
+      try {
+        await _repository.firestore.collection('users').doc(userId).delete();
+        debugPrint('🔥 사용자 문서 삭제 완료');
+      } catch (e) {
+        debugPrint('🔥 사용자 문서 삭제 실패: $e');
+      }
+      
+      // 4. 프로필 문서 삭제
+      try {
+        await _repository.firestore.collection('profiles').doc(userId).delete();
+        debugPrint('🔥 프로필 문서 삭제 완료');
+      } catch (e) {
+        debugPrint('🔥 프로필 문서 삭제 실패: $e');
+      }
+      
+      debugPrint('🔥 사용자 데이터 삭제 완료: $userId');
+    } catch (e) {
+      debugPrint('🔥 사용자 데이터 삭제 전체 실패: $e');
+      rethrow;
     }
   }
   

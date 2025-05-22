@@ -70,8 +70,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  // 🔥 강력한 로그아웃 처리 함수
+  // 🔥🔥🔥 강화된 로그아웃 처리 함수 - 즉시 Firebase 로그아웃 + 프로바이더 정리
   Future<void> _handleLogout() async {
+    if (_isLoggingOut) return; // 중복 실행 방지
+    
     showCupertinoDialog(
       context: context,
       builder: (dialogContext) => CupertinoAlertDialog(
@@ -85,32 +87,59 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           CupertinoDialogAction(
             isDestructiveAction: true,
             onPressed: () async {
-              Navigator.of(dialogContext).pop();
+              Navigator.of(dialogContext).pop(); // 다이얼로그 먼저 닫기
               
-              setState(() {
-                _isLoggingOut = true;
-              });
+              // 🔥 즉시 로딩 상태로 변경 (UI 피드백)
+              if (mounted) {
+                setState(() {
+                  _isLoggingOut = true;
+                });
+              }
+              
+              debugPrint('🔥🔥🔥 강화된 로그아웃 시작');
               
               try {
-                debugPrint('🔥 강력한 로그아웃 시도 시작');
+                // 🔥 1단계: 모든 프로바이더 즉시 무효화 (권한 오류 방지)
+                ref.invalidate(currentUserProvider);
+                ref.invalidate(authStateProvider);
+                ref.invalidate(profileControllerProvider);
+                ref.invalidate(feedPostsProvider);
+                debugPrint('🔥 즉시 프로바이더 무효화 완료');
                 
-                // 1. AuthController의 강력한 signOut 사용
-                await ref.read(authControllerProvider.notifier).signOut();
+                // 🔥 2단계: 상태 완전 초기화
+                ref.read(signupProgressProvider.notifier).state = SignupProgress.none;
+                ref.read(forceLogoutProvider.notifier).state = true;
+                await clearSignupProgress();
+                debugPrint('🔥 상태 완전 초기화 완료');
                 
-                // 2. 추가 대기 시간
+                // 🔥 3단계: Firebase 즉시 로그아웃 (권한 오류 방지를 위해)
+                try {
+                  await ref.read(authControllerProvider.notifier).signOut();
+                  debugPrint('🔥 Firebase 로그아웃 성공');
+                } catch (e) {
+                  debugPrint('🔥 Firebase 로그아웃 에러: $e');
+                  // Firebase 로그아웃 실패해도 계속 진행
+                }
+                
+                // 🔥 4단계: 추가 프로바이더 정리 (지연)
                 await Future.delayed(const Duration(milliseconds: 200));
+                try {
+                  ref.invalidate(currentUserProvider);
+                  ref.invalidate(authStateProvider);
+                  ref.invalidate(profileControllerProvider);
+                  debugPrint('🔥 추가 프로바이더 정리 완료');
+                } catch (e) {
+                  debugPrint('🔥 추가 프로바이더 정리 에러 (무시): $e');
+                }
                 
-                debugPrint('🔥 로그아웃 완료, 강제 네비게이션 시작');
-                
-                // 3. 확실한 네비게이션 처리
+                // 🔥 5단계: 강제 네비게이션 (마지막에)
+                await Future.delayed(const Duration(milliseconds: 100));
                 if (main_file.navigatorKey.currentState != null) {
-                  main_file.navigatorKey.currentState!.pushAndRemoveUntil(
-                    CupertinoPageRoute(
-                      builder: (context) => const LoginScreen(),
-                    ),
+                  main_file.navigatorKey.currentState!.pushNamedAndRemoveUntil(
+                    '/login',
                     (route) => false, // 모든 이전 화면 제거
                   );
-                  debugPrint('🔥 글로벌 네비게이터로 로그인 화면 이동 완료');
+                  debugPrint('🔥 강제 로그인 화면 이동 완료');
                 } else if (mounted) {
                   Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
                     CupertinoPageRoute(
@@ -121,23 +150,37 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   debugPrint('🔥 로컬 네비게이터로 로그인 화면 이동 완료');
                 }
                 
-              } catch (e) {
-                debugPrint('🔥 로그아웃 실패: $e');
+                debugPrint('🔥🔥🔥 강화된 로그아웃 완료');
                 
-                // 실패해도 강제로 로그인 화면으로 이동
-                if (mounted) {
-                  setState(() {
-                    _isLoggingOut = false;
-                  });
+              } catch (e) {
+                debugPrint('🔥 로그아웃 처리 실패: $e');
+                
+                // 실패해도 강제로 처리
+                try {
+                  ref.read(forceLogoutProvider.notifier).state = true;
+                  ref.read(signupProgressProvider.notifier).state = SignupProgress.none;
+                  await clearSignupProgress();
                   
                   if (main_file.navigatorKey.currentState != null) {
-                    main_file.navigatorKey.currentState!.pushAndRemoveUntil(
+                    main_file.navigatorKey.currentState!.pushNamedAndRemoveUntil(
+                      '/login',
+                      (route) => false,
+                    );
+                  } else if (mounted) {
+                    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
                       CupertinoPageRoute(
                         builder: (context) => const LoginScreen(),
                       ),
                       (route) => false,
                     );
                   }
+                } catch (_) {}
+              } finally {
+                // 로딩 상태 해제 (mounted 체크)
+                if (mounted) {
+                  setState(() {
+                    _isLoggingOut = false;
+                  });
                 }
               }
             },
@@ -491,7 +534,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   CupertinoButton(
                     padding: EdgeInsets.zero,
                     onPressed: _isLoggingOut ? null : _handleLogout,
-                    child: const Icon(CupertinoIcons.square_arrow_right),
+                    child: _isLoggingOut 
+                      ? const CupertinoActivityIndicator()
+                      : const Icon(CupertinoIcons.square_arrow_right),
                   ),
                   CupertinoButton(
                     padding: EdgeInsets.zero,
