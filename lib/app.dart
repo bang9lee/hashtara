@@ -42,45 +42,39 @@ class _HashtaraAppState extends ConsumerState<HashtaraApp> {
   void initState() {
     super.initState();
     
-    // 앱 시작 시 로컬 저장소에서 회원가입 진행 상태 불러오기
+    // 앱 시작 시 간단한 초기화
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadSavedSignupProgress();
-      
-      // 알림 서비스 초기화 및 대기 중인 네비게이션 처리
-      final notificationService = ref.read(notificationServiceProvider);
-      // 대기 중인 네비게이션 처리
-      Future.delayed(const Duration(seconds: 3), () {
-        notificationService.processPendingNavigation();
-      });
+      _initializeApp();
     });
   }
   
-  // 저장된 회원가입 진행 상태 불러오기
-  Future<void> _loadSavedSignupProgress() async {
+  // 간단한 앱 초기화
+  Future<void> _initializeApp() async {
     try {
+      // 1. 알림 서비스 초기화
+      final notificationService = ref.read(notificationServiceProvider);
+      await notificationService.initialize();
+      
+      // 2. 저장된 회원가입 상태 불러오기
       final savedState = await loadSignupProgress();
       if (savedState['userId'] != null) {
-        // 저장된 상태가 있으면 메모리에 복원
         ref.read(signupProgressProvider.notifier).state = savedState['progress'];
-        debugPrint('저장된 회원가입 상태 복원: ${savedState['progress']}, 사용자: ${savedState['userId']}');
+        debugPrint('저장된 회원가입 상태 복원: ${savedState['progress']}');
       }
     } catch (e) {
-      debugPrint('저장된 회원가입 상태 로드 실패: $e');
+      debugPrint('앱 초기화 실패: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // 로그인 상태를 확인하는 프로바이더 사용
+    // 🔥 핵심 수정: authStateProvider를 직접 감시하여 즉시 반응
     final authState = ref.watch(authStateProvider);
-    
-    // 회원가입 진행 상태 확인
     final signupProgress = ref.watch(signupProgressProvider);
     
     // 디버그 로그 추가
-    debugPrint('HashtaraApp 리빌드됨 - AuthState: ${authState.valueOrNull != null ? '로그인됨' : '로그인안됨'}, 진행상태: $signupProgress');
+    debugPrint('HashtaraApp 리빌드됨 - AuthState: ${authState.runtimeType}, 진행상태: $signupProgress');
     
-    // 스플래시 화면 후 authState와 signupProgress에 따라 화면 결정
     return CupertinoApp(
       title: 'Hashtara',
       navigatorKey: main_file.navigatorKey, // 글로벌 네비게이터 키 추가
@@ -145,40 +139,64 @@ class _HashtaraAppState extends ConsumerState<HashtaraApp> {
         // 기본 라우트
         return null;
       },
+      // 🔥 핵심 수정: authState를 직접 사용하여 즉시 반응하도록 수정
       home: authState.when(
         data: (user) {
+          debugPrint('🔥 AuthState 데이터 수신: user=${user?.uid}');
+          
           if (user == null) {
-            debugPrint('사용자 로그인되지 않음, 로그인 화면으로 이동');
-            return const SplashToLoginScreen();
+            debugPrint('🔥 사용자 로그인되지 않음, 로그인 화면으로 이동');
+            return const LoginScreen(); // 🔥 바로 로그인 화면 반환
           } else {
             debugPrint('✅ 로그인된 사용자 확인: ${user.uid}');
             
-            // 유저 정보 명시적으로 로드
-            ref.read(currentUserProvider);
+            // currentUserProvider 감시 (사용자 문서 존재 여부 확인용)
+            final currentUserAsync = ref.watch(currentUserProvider);
             
-            // 현재 회원가입 진행 상태에 따라 화면 결정
-            switch (signupProgress) {
-              case SignupProgress.registered:
-                debugPrint('➡️ 약관 동의 필요: ${user.uid}');
-                return TermsAgreementScreen(userId: user.uid);
-              case SignupProgress.termsAgreed:
-                debugPrint('➡️ 프로필 설정 필요: ${user.uid}');
-                return SetupProfileScreen(userId: user.uid);
-              case SignupProgress.completed:
-              case SignupProgress.none:
-                debugPrint('➡️ 메인 화면으로 이동');
-                return const MainTabScreen();
-            }
+            return currentUserAsync.when(
+              data: (userModel) {
+                debugPrint('🔥 CurrentUser 데이터: ${userModel?.id}');
+                
+                // 사용자 모델이 null이면 회원가입 프로세스 진행
+                if (userModel == null) {
+                  debugPrint('🔥 사용자 모델이 null - 회원가입 프로세스 확인');
+                  
+                  // 현재 회원가입 진행 상태에 따라 화면 결정
+                  switch (signupProgress) {
+                    case SignupProgress.registered:
+                      debugPrint('➡️ 약관 동의 필요: ${user.uid}');
+                      return TermsAgreementScreen(userId: user.uid);
+                    case SignupProgress.termsAgreed:
+                      debugPrint('➡️ 프로필 설정 필요: ${user.uid}');
+                      return SetupProfileScreen(userId: user.uid);
+                    case SignupProgress.completed:
+                    case SignupProgress.none:
+                      debugPrint('🔥 알 수 없는 상태 - 로그인 화면으로');
+                      return const LoginScreen();
+                  }
+                } else {
+                  debugPrint('➡️ 기존 사용자 - 메인 화면으로 이동');
+                  return const MainTabScreen();
+                }
+              },
+              loading: () {
+                debugPrint('🔥 CurrentUser 로딩 중...');
+                return const SplashScreen();
+              },
+              error: (error, stack) {
+                debugPrint('🔥 CurrentUser 에러: $error');
+                return const LoginScreen(); // 🔥 에러 시 바로 로그인 화면
+              },
+            );
           }
         },
         loading: () {
-          debugPrint('인증 상태 로딩 중...');
+          debugPrint('🔥 AuthState 로딩 중...');
           return const SplashScreen();
         },
         error: (error, stack) {
-          // 에러 로그 추가
-          debugPrint('인증 상태 로드 에러: $error');
-          return const SplashToLoginScreen();
+          debugPrint('🔥 AuthState 에러: $error');
+          return const LoginScreen(); // 🔥 에러 시 바로 로그인 화면
         },
       ),
     );
@@ -209,44 +227,6 @@ class NavigationLogger extends NavigatorObserver {
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
     debugPrint('Navigation: REPLACED ${oldRoute?.settings.name ?? oldRoute.toString()} WITH ${newRoute?.settings.name ?? newRoute.toString()}');
     super.didReplace(newRoute: newRoute, oldRoute: oldRoute);
-  }
-}
-
-// 스플래시 화면을 보여준 후 로그인 화면으로 자동 전환하는 위젯
-class SplashToLoginScreen extends StatefulWidget {
-  const SplashToLoginScreen({Key? key}) : super(key: key);
-
-  @override
-  State<SplashToLoginScreen> createState() => _SplashToLoginScreenState();
-}
-
-class _SplashToLoginScreenState extends State<SplashToLoginScreen> {
-  bool _isNavigating = false; // 네비게이션 중복 방지 플래그
-
-  @override
-  void initState() {
-    super.initState();
-    // 2초 후 로그인 화면으로 전환 (한번만 실행되도록 플래그 사용)
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted && !_isNavigating) {
-        _isNavigating = true; // 네비게이션 시작 플래그 설정
-        // 다음 프레임에서 네비게이션 실행
-        Future.microtask(() {
-          if (mounted) {
-            Navigator.of(context).pushReplacement(
-              CupertinoPageRoute(
-                builder: (context) => const LoginScreen(),
-              ),
-            );
-          }
-        });
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return const SplashScreen();
   }
 }
 

@@ -7,7 +7,7 @@ import '../../models/notification_model.dart';
 import '../../providers/notification_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/notification_service.dart';
-import '../feed/notification_helpers.dart';
+import 'notification_helpers.dart';
 
 class NotificationScreen extends ConsumerStatefulWidget {
   const NotificationScreen({Key? key}) : super(key: key);
@@ -226,7 +226,7 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
       child: Container(
         color: notification.isRead 
           ? AppColors.darkBackground 
-          : AppColors.primaryPurple.withAlpha(25), // withOpacity 대신 withAlpha 사용
+          : AppColors.primaryPurple.withAlpha(25),
         padding: const EdgeInsets.symmetric(
           horizontal: 16.0,
           vertical: 12.0,
@@ -318,7 +318,7 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
       width: 40,
       height: 40,
       decoration: BoxDecoration(
-        color: iconColor.withAlpha(50), // withOpacity 대신 withAlpha 사용
+        color: iconColor.withAlpha(50),
         shape: BoxShape.circle,
       ),
       child: Icon(

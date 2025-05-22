@@ -6,14 +6,14 @@ import '../../../constants/app_strings.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/feed_provider.dart';
 import '../../../providers/hashtag_channel_provider.dart';
-import '../../../services/notification_service.dart'; // 알림 서비스 임포트 추가
+import '../../../providers/notification_provider.dart';
 import '../../../models/hashtag_channel_model.dart';
 import '../widgets/post_card.dart';
 import 'hashtag_explore_screen.dart';
 import 'create_post_screen.dart';
 import 'hashtag_channel_detail_screen.dart';
 import 'subscribed_channels_screen.dart';
-import 'notification_screen.dart'; // 알림 화면 임포트 추가
+import 'notification_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -22,42 +22,44 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAliveClientMixin {
-  final RefreshController _refreshController = RefreshController(initialRefresh: false);
-  
+class _HomeScreenState extends ConsumerState<HomeScreen>
+    with AutomaticKeepAliveClientMixin {
+  final RefreshController _refreshController =
+      RefreshController(initialRefresh: false);
+
   @override
   bool get wantKeepAlive => true; // 상태 유지를 위한 설정
-  
+
   @override
   void initState() {
     super.initState();
     debugPrint('HomeScreen 초기화됨');
   }
-  
+
   @override
   void dispose() {
     _refreshController.dispose();
     super.dispose();
   }
-  
+
   // 새로고침 처리 함수
   Future<void> _onRefresh() async {
     try {
       // 인기 채널 새로고침
       ref.invalidate(popularHashtagChannelsProvider);
       debugPrint('인기 채널 새로고침 요청됨');
-      
+
       // 피드 게시물 새로고침
       ref.invalidate(feedPostsProvider);
       debugPrint('피드 새로고침 요청됨');
-      
+
       // 로그인 된 경우 구독 채널도 새로고침
       final user = ref.read(currentUserProvider).valueOrNull;
       if (user != null) {
         ref.invalidate(userSubscribedChannelsProvider(user.id));
         debugPrint('사용자 채널 새로고침 요청됨: ${user.id}');
       }
-      
+
       // 딜레이 추가 (실제 API 요청 느낌 주기)
       await Future.delayed(const Duration(milliseconds: 800));
       debugPrint('새로고침 완료');
@@ -71,18 +73,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    
+
     final currentUser = ref.watch(currentUserProvider);
-    
+
     // 인기 해시태그 채널 (캐싱 적용된 상태)
     final popularChannels = ref.watch(popularHashtagChannelsProvider);
-    
-    // 여기가 수정된 부분: 필터링된 피드 게시물 가져오기
+
+    // 필터링된 피드 게시물 가져오기
     final userId = currentUser.valueOrNull?.id;
-    final feedPosts = userId != null 
+    final feedPosts = userId != null
         ? ref.watch(filteredFeedPostsProvider(userId))
         : ref.watch(feedPostsProvider);
-    
+
     // 사용자가 구독한 해시태그 채널 (조건부 로드)
     final subscribedChannels = currentUser.maybeWhen(
       data: (user) => user != null
@@ -90,10 +92,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
           : null,
       orElse: () => null,
     );
-    
+
     // 안 읽은 알림 여부 확인
-    final hasUnreadNotifications = ref.watch(hasUnreadNotificationsProvider);
-    
+    final hasUnreadNotifications = currentUser.maybeWhen(
+      data: (user) => user != null
+          ? ref.watch(hasUnreadNotificationsProvider(user.id))
+          : const AsyncValue.data(false),
+      orElse: () => const AsyncValue.data(false),
+    );
+
     return CupertinoPageScaffold(
       backgroundColor: AppColors.darkBackground,
       navigationBar: CupertinoNavigationBar(
@@ -102,7 +109,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
           bottom: BorderSide(color: AppColors.separator),
         ),
         middle: ShaderMask(
-          shaderCallback: (bounds) => AppColors.primaryGradient.createShader(bounds),
+          shaderCallback: (bounds) =>
+              AppColors.primaryGradient.createShader(bounds),
           child: const Text(
             AppStrings.appName,
             style: TextStyle(
@@ -133,7 +141,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
             CupertinoButton(
               padding: EdgeInsets.zero,
               onPressed: () {
-                // 알림 화면으로 이동 (수정된 부분)
+                // 알림 화면으로 이동
                 Navigator.of(context).push(
                   CupertinoPageRoute(
                     builder: (context) => const NotificationScreen(),
@@ -147,19 +155,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
                     color: AppColors.white,
                   ),
                   // 안 읽은 알림이 있는 경우 빨간 점 표시
-                  if (hasUnreadNotifications)
-                    Positioned(
-                      top: 0,
-                      right: 0,
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: AppColors.accentRed,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ),
+                  hasUnreadNotifications.when(
+                    data: (hasUnread) => hasUnread
+                        ? Positioned(
+                            top: 0,
+                            right: 0,
+                            child: Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: AppColors.accentRed,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                    loading: () => const SizedBox.shrink(),
+                    error: (_, __) => const SizedBox.shrink(),
+                  ),
                 ],
               ),
             ),
@@ -217,7 +230,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
                   ),
                 ),
               ),
-              
+
               // 1. 내 채널 섹션 (로그인된 사용자만 표시)
               if (currentUser.valueOrNull != null) ...[
                 SliverToBoxAdapter(
@@ -240,16 +253,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
                         CupertinoButton(
                           padding: EdgeInsets.zero,
                           onPressed: () {
-                            // 수정된 부분: 내 구독 채널 화면으로 이동
-                            Navigator.of(context).push(
+                            // 내 구독 채널 화면으로 이동
+                            Navigator.of(context)
+                                .push(
                               CupertinoPageRoute(
-                                builder: (context) => const SubscribedChannelsScreen(),
+                                builder: (context) =>
+                                    const SubscribedChannelsScreen(),
                               ),
-                            ).then((_) {
+                            )
+                                .then((_) {
                               // 화면 복귀 시 데이터 새로고침
-                              final user = ref.read(currentUserProvider).valueOrNull;
+                              final user =
+                                  ref.read(currentUserProvider).valueOrNull;
                               if (user != null) {
-                                ref.invalidate(userSubscribedChannelsProvider(user.id));
+                                ref.invalidate(
+                                    userSubscribedChannelsProvider(user.id));
                               }
                             });
                           },
@@ -262,12 +280,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
                     ),
                   ),
                 ),
-                
+
                 // 구독 채널 목록
                 if (subscribedChannels != null)
                   _buildSubscribedChannelsSection(subscribedChannels),
               ],
-              
+
               // 2. 인기 해시태그 섹션
               SliverToBoxAdapter(
                 child: Padding(
@@ -289,11 +307,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
                       CupertinoButton(
                         padding: EdgeInsets.zero,
                         onPressed: () {
-                          Navigator.of(context).push(
+                          Navigator.of(context)
+                              .push(
                             CupertinoPageRoute(
-                              builder: (context) => const HashtagExploreScreen(),
+                              builder: (context) =>
+                                  const HashtagExploreScreen(),
                             ),
-                          ).then((_) {
+                          )
+                              .then((_) {
                             // 화면 복귀 시 데이터 새로고침
                             ref.invalidate(popularHashtagChannelsProvider);
                           });
@@ -307,19 +328,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
                   ),
                 ),
               ),
-              
+
               // 인기 채널 목록 - 로우 형식으로 변경
               _buildPopularChannelsSection(popularChannels),
-              
+
               // 여백
               const SliverToBoxAdapter(
                 child: SizedBox(height: 16),
               ),
-              
+
               // 3. 최신 게시물 섹션
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 0.0),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16.0, vertical: 0.0),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -345,7 +367,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
                   ),
                 ),
               ),
-              
+
               // 피드 게시물 목록
               _buildFeedPostsSection(feedPosts),
             ],
@@ -354,9 +376,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
       ),
     );
   }
-  
+
   // 구독 채널 섹션
-  Widget _buildSubscribedChannelsSection(AsyncValue<List<HashtagChannelModel>> subscribedChannels) {
+  Widget _buildSubscribedChannelsSection(
+      AsyncValue<List<HashtagChannelModel>> subscribedChannels) {
     return subscribedChannels.when(
       data: (channels) {
         if (channels.isEmpty) {
@@ -386,7 +409,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
             ),
           );
         }
-        
+
         return SliverToBoxAdapter(
           child: SizedBox(
             height: 140,
@@ -423,9 +446,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
       ),
     );
   }
-  
+
   // 인기 채널 섹션
-  Widget _buildPopularChannelsSection(AsyncValue<List<HashtagChannelModel>> popularChannels) {
+  Widget _buildPopularChannelsSection(
+      AsyncValue<List<HashtagChannelModel>> popularChannels) {
     return popularChannels.when(
       data: (channels) {
         if (channels.isEmpty) {
@@ -441,7 +465,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
             ),
           );
         }
-        
+
         // 로우 형식으로 변경
         return SliverToBoxAdapter(
           child: Padding(
@@ -489,7 +513,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
       ),
     );
   }
-  
+
   // 피드 게시물 섹션
   Widget _buildFeedPostsSection(AsyncValue<List<dynamic>> feedPosts) {
     return feedPosts.when(
@@ -521,7 +545,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
             ),
           );
         }
-        
+
         return SliverList(
           delegate: SliverChildBuilderDelegate(
             (context, index) {
@@ -565,7 +589,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
       },
     );
   }
-  
+
   // 해시태그 핀 위젯 (로우 형식) - 그라데이션 적용
   Widget _buildHashtagPill({required String tag, required VoidCallback onTap}) {
     return GestureDetector(
@@ -600,7 +624,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutomaticKeepAlive
       ),
     );
   }
-  
+
   // 수평 채널 카드 위젯 - 그라데이션 적용
   Widget _buildChannelCard(HashtagChannelModel channel) {
     return GestureDetector(

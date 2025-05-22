@@ -1,9 +1,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:logger/logger.dart';
 import '../models/user_model.dart';
+import '../repositories/notification_repository.dart';
 
 // 인증 오류 타입 열거형 추가
 enum AuthErrorType {
@@ -112,25 +112,28 @@ class AuthErrorHandler {
 class AuthRepository {
   final FirebaseAuth _auth;
   final FirebaseFirestore _firestore;
-  final FirebaseStorage _storage; // 회원탈퇴 시 사용
   final GoogleSignIn _googleSignIn;
   final Logger _logger;
+  final NotificationRepository _notificationRepository;
 
   AuthRepository({
     FirebaseAuth? auth, 
     FirebaseFirestore? firestore, 
-    FirebaseStorage? storage,
     GoogleSignIn? googleSignIn, 
-    Logger? logger
+    Logger? logger,
+    NotificationRepository? notificationRepository,
   })
       : _auth = auth ?? FirebaseAuth.instance,
         _firestore = firestore ?? FirebaseFirestore.instance,
-        _storage = storage ?? FirebaseStorage.instance,
         _googleSignIn = googleSignIn ?? GoogleSignIn(),
-        _logger = logger ?? Logger();
+        _logger = logger ?? Logger(),
+        _notificationRepository = notificationRepository ?? NotificationRepository();
 
   User? get currentUser => _auth.currentUser;
   Stream<User?> get authStateChanges => _auth.authStateChanges();
+  
+  // Firestore 인스턴스 접근을 위한 getter 추가
+  FirebaseFirestore get firestore => _firestore;
   
   // 사용자 프로필 가져오기
   Future<UserModel?> getUserProfile(String userId) async {
@@ -168,14 +171,14 @@ class AuthRepository {
     String? profileImageUrl,
   ) async {
     try {
-      final now = DateTime.now(); // Timestamp를 DateTime으로 변경
+      final now = DateTime.now();
       final newUser = UserModel(
         id: userId,
         name: name,
         username: username,
-        email: _auth.currentUser?.email ?? '',  // null이면 빈 문자열 사용
+        email: _auth.currentUser?.email ?? '',
         profileImageUrl: profileImageUrl,
-        createdAt: now,  // DateTime 타입 사용
+        createdAt: now,
       );
       
       await _firestore.collection('users').doc(userId).set(newUser.toMap());
@@ -312,10 +315,9 @@ class AuthRepository {
     }
   }
 
-  // 추가: 약관 동의 상태 업데이트 (수정된 부분)
+  // 약관 동의 상태 업데이트
   Future<void> updateTermsAgreement(String userId, bool agreed) async {
     try {
-      // 문서가 존재하는지 먼저 확인
       final docRef = _firestore.collection('users').doc(userId);
       final docSnapshot = await docRef.get();
       
@@ -326,10 +328,8 @@ class AuthRepository {
       };
       
       if (docSnapshot.exists) {
-        // 문서가 존재하면 업데이트
         await docRef.update(data);
       } else {
-        // 문서가 존재하지 않으면 새로 생성
         await docRef.set(data, SetOptions(merge: true));
       }
       
@@ -344,20 +344,17 @@ class AuthRepository {
     }
   }
 
-  // 추가: 프로필 완료 상태 업데이트
+  // 프로필 완료 상태 업데이트
   Future<void> updateProfileComplete(String userId, bool complete) async {
     try {
-      // 문서가 존재하는지 먼저 확인
       final docRef = _firestore.collection('users').doc(userId);
       final docSnapshot = await docRef.get();
       
       if (docSnapshot.exists) {
-        // 문서가 존재하면 업데이트
         await docRef.update({
           'profileComplete': complete,
         });
       } else {
-        // 문서가 존재하지 않으면 새로 생성
         await docRef.set({
           'profileComplete': complete,
         }, SetOptions(merge: true));
@@ -368,159 +365,226 @@ class AuthRepository {
       _logger.e('프로필 완료 상태 업데이트 실패: $e');
       throw AuthException(
         type: AuthErrorType.unknown, 
-        message: '프로필 완료 상태를 업데이트하는 중 오류가 발생했습니다.', 
+        message: '프로필 완료 상태를 업데이트하는 중 오료가 발생했습니다.', 
         originalError: e
       );
     }
   }
 
-  // 회원 탈퇴 메서드 수정/확장
+  // 🔥 완전히 새로운 회원 탈퇴 메서드 - 데이터 먼저 삭제, Auth는 나중에
   Future<void> deleteAccount() async {
+    final user = _auth.currentUser;
+    if (user == null) { 
+      throw AuthException(
+        type: AuthErrorType.userNotFound, 
+        message: '로그인된 사용자가 없습니다.'
+      ); 
+    }
+    
+    final userId = user.uid;
+    _logger.i('회원 탈퇴 시작: $userId');
+    
+    // 단계별로 진행하되, 각 단계가 실패해도 다음 단계는 진행
+    List<String> errors = [];
+    bool authDeleted = false;
+    
     try {
-      final user = _auth.currentUser;
-      if (user == null) { 
-        throw AuthException(
-          type: AuthErrorType.userNotFound, 
-          message: '로그인된 사용자가 없습니다.'
-        ); 
-      }
-      
-      _logger.i('회원 탈퇴 시작: ${user.uid}');
-      
-      // 배치 처리를 위한 객체 생성
-      final batch = _firestore.batch();
-      
-      // 1. 사용자의 게시물 삭제
-      try {
-        final postsQuery = await _firestore.collection('posts').where('userId', isEqualTo: user.uid).get();
-        _logger.i('삭제할 게시물 수: ${postsQuery.docs.length}');
-        
-        for (final doc in postsQuery.docs) {
-          batch.delete(doc.reference);
-          
-          // 게시물의 이미지도 삭제 (비동기 실행)
-          try {
-            final postId = doc.id;
-            final storageRef = _storage.ref().child('posts/$postId');
-            
-            try {
-              final listResult = await storageRef.listAll();
-              for (final item in listResult.items) {
-                await item.delete();
-              }
-              _logger.i('게시물 이미지 삭제 성공: $postId');
-            } catch (e) {
-              _logger.e('게시물 이미지 목록 조회 실패: $e');
-            }
-          } catch (e) {
-            _logger.e('게시물 이미지 삭제 실패 (계속 진행): $e');
-          }
-        }
-      } catch (e) {
-        _logger.e('게시물 삭제 실패 (계속 진행): $e');
-      }
-      
-      // 2. 사용자의 댓글 삭제
-      try {
-        final commentsQuery = await _firestore.collection('comments').where('userId', isEqualTo: user.uid).get();
-        _logger.i('삭제할 댓글 수: ${commentsQuery.docs.length}');
-        
-        for (final doc in commentsQuery.docs) {
-          batch.delete(doc.reference);
-        }
-      } catch (e) {
-        _logger.e('댓글 삭제 실패 (계속 진행): $e');
-      }
-      
-      // 3. 사용자의 좋아요 삭제
-      try {
-        // 게시물 좋아요 삭제 - 검색 성능 이슈로 생략 가능
-      } catch (e) {
-        _logger.e('좋아요 삭제 실패 (계속 진행): $e');
-      }
-      
-      // 4. 사용자의 팔로우/팔로워 관계 삭제
-      try {
-        final followingQuery = await _firestore.collection('users').doc(user.uid).collection('following').get();
-        for (final doc in followingQuery.docs) {
-          batch.delete(doc.reference);
-          
-          // 상대방의 팔로워 목록에서도 삭제
-          try {
-            final otherUserId = doc.id;
-            batch.delete(_firestore.collection('users').doc(otherUserId).collection('followers').doc(user.uid));
-          } catch (e) {
-            _logger.e('상대방 팔로워 목록 수정 실패 (계속 진행): $e');
-          }
-        }
-        
-        final followersQuery = await _firestore.collection('users').doc(user.uid).collection('followers').get();
-        for (final doc in followersQuery.docs) {
-          batch.delete(doc.reference);
-          
-          // 상대방의 팔로잉 목록에서도 삭제
-          try {
-            final otherUserId = doc.id;
-            batch.delete(_firestore.collection('users').doc(otherUserId).collection('following').doc(user.uid));
-          } catch (e) {
-            _logger.e('상대방 팔로잉 목록 수정 실패 (계속 진행): $e');
-          }
-        }
-      } catch (e) {
-        _logger.e('팔로우/팔로워 관계 삭제 실패 (계속 진행): $e');
-      }
-      
-      // 5. 사용자의 채팅 삭제
-      try {
-        final chatsQuery = await _firestore.collection('chats').where('participants', arrayContains: user.uid).get();
-        _logger.i('관련 채팅방 수: ${chatsQuery.docs.length}');
-        
-        for (final chatDoc in chatsQuery.docs) {
-          // 채팅방 내 메시지 삭제
-          final messagesQuery = await _firestore.collection('chats').doc(chatDoc.id).collection('messages').get();
-          for (final msgDoc in messagesQuery.docs) {
-            batch.delete(msgDoc.reference);
-          }
-          
-          // 채팅방 자체 삭제
-          batch.delete(chatDoc.reference);
-        }
-      } catch (e) {
-        _logger.e('채팅 삭제 실패 (계속 진행): $e');
-      }
-      
-      // 6. 프로필 이미지 삭제
-      try {
-        final profileImageRef = _storage.ref().child('profile_images/${user.uid}.jpg');
-        await profileImageRef.delete();
-        _logger.i('프로필 이미지 삭제 성공');
-      } catch (e) {
-        _logger.e('프로필 이미지 삭제 실패 (계속 진행): $e');
-      }
-      
-      // 7. 사용자 프로필 문서 삭제
-      batch.delete(_firestore.collection('profiles').doc(user.uid));
-      
-      // 8. 사용자 문서 삭제
-      batch.delete(_firestore.collection('users').doc(user.uid));
-      
-      // 배치 커밋
-      await batch.commit();
-      _logger.i('Firebase 데이터 삭제 완료');
-      
-      // 9. Firebase Auth 계정 삭제
-      await user.delete();
-      _logger.i('계정 삭제 완료: ${user.uid}');
+      // 1단계: 알림 데이터 삭제 (Auth 삭제 전에 먼저!)
+      _logger.i('1단계: 알림 데이터 삭제 시작');
+      await _notificationRepository.deleteAllUserNotifications(userId);
+      await _notificationRepository.deleteUserFCMToken(userId);
+      _logger.i('알림 데이터 삭제 성공');
     } catch (e) {
-      _logger.e('계정 삭제 실패: $e');
+      _logger.w('알림 데이터 삭제 실패 (계속 진행): $e');
+      errors.add('알림 삭제 실패: $e');
+    }
+    
+    try {
+      // 2단계: 사용자 게시물 삭제
+      _logger.i('2단계: 사용자 게시물 삭제 시작');
+      await _deleteUserPosts(userId);
+      _logger.i('사용자 게시물 삭제 성공');
+    } catch (e) {
+      _logger.w('사용자 게시물 삭제 실패 (계속 진행): $e');
+      errors.add('게시물 삭제 실패: $e');
+    }
+    
+    try {
+      // 3단계: 사용자 댓글 삭제
+      _logger.i('3단계: 사용자 댓글 삭제 시작');
+      await _deleteUserComments(userId);
+      _logger.i('사용자 댓글 삭제 성공');
+    } catch (e) {
+      _logger.w('사용자 댓글 삭제 실패 (계속 진행): $e');
+      errors.add('댓글 삭제 실패: $e');
+    }
+    
+    try {
+      // 4단계: 사용자 서브컬렉션 삭제
+      _logger.i('4단계: 사용자 서브컬렉션 삭제 시작');
+      await _deleteUserSubcollections(userId);
+      _logger.i('사용자 서브컬렉션 삭제 성공');
+    } catch (e) {
+      _logger.w('사용자 서브컬렉션 삭제 실패 (계속 진행): $e');
+      errors.add('서브컬렉션 삭제 실패: $e');
+    }
+    
+    try {
+      // 5단계: 사용자 문서 삭제 (중요!)
+      _logger.i('5단계: 사용자 문서 삭제 시작');
+      await _firestore.collection('users').doc(userId).delete();
+      _logger.i('사용자 문서 삭제 성공');
+    } catch (e) {
+      _logger.e('사용자 문서 삭제 실패: $e');
+      errors.add('사용자 문서 삭제 실패: $e');
+    }
+    
+    try {
+      // 6단계: Firebase Auth 계정 삭제 (가장 마지막!)
+      _logger.i('6단계: Firebase Auth 계정 삭제 시작');
+      await user.delete();
+      authDeleted = true;
+      _logger.i('Firebase Auth 계정 삭제 성공');
+    } catch (e) {
+      _logger.e('Firebase Auth 계정 삭제 실패: $e');
+      errors.add('Auth 삭제 실패: $e');
+      
+      // requires-recent-login 에러인 경우 특별 처리
       if (e is FirebaseAuthException && e.code == 'requires-recent-login') {
-        throw AuthException(
-          type: AuthErrorType.invalidCredential, 
-          message: '보안상의 이유로 다시 로그인한 후 계정을 삭제해주세요.', 
-          originalError: e
-        );
+        _logger.w('최근 로그인 필요 에러 - 강제 로그아웃으로 처리');
+        try {
+          await signOut();
+          authDeleted = true; // 로그아웃도 계정 제거 효과
+          _logger.i('강제 로그아웃 완료');
+        } catch (signOutError) {
+          _logger.e('강제 로그아웃도 실패: $signOutError');
+          errors.add('강제 로그아웃 실패: $signOutError');
+        }
       }
-      throw AuthErrorHandler.handleException(e);
+    }
+    
+    // 결과 로깅
+    if (errors.isEmpty) {
+      _logger.i('회원 탈퇴 완전 성공: $userId');
+    } else {
+      _logger.w('회원 탈퇴 부분 성공 (일부 오류): ${errors.join(', ')}');
+    }
+    
+    // Auth 삭제가 실패한 경우에만 예외 throw
+    if (!authDeleted) {
+      throw AuthException(
+        type: AuthErrorType.unknown,
+        message: '계정 삭제 중 오류가 발생했습니다. 다시 로그인 후 시도해주세요.',
+      );
+    }
+  }
+  
+  // 사용자 게시물 삭제
+  Future<void> _deleteUserPosts(String userId) async {
+    try {
+      final postsQuery = await _firestore.collection('posts')
+          .where('userId', isEqualTo: userId)
+          .limit(100)
+          .get();
+      
+      if (postsQuery.docs.isEmpty) {
+        _logger.i('삭제할 게시물 없음');
+        return;
+      }
+      
+      final batch = _firestore.batch();
+      for (final doc in postsQuery.docs) {
+        batch.delete(doc.reference);
+      }
+      
+      await batch.commit();
+      _logger.i('게시물 ${postsQuery.docs.length}개 삭제 완료');
+    } catch (e) {
+      _logger.e('게시물 삭제 실패: $e');
+      rethrow;
+    }
+  }
+  
+  // 사용자 댓글 삭제
+  Future<void> _deleteUserComments(String userId) async {
+    try {
+      final commentsQuery = await _firestore.collection('comments')
+          .where('userId', isEqualTo: userId)
+          .limit(100)
+          .get();
+      
+      if (commentsQuery.docs.isEmpty) {
+        _logger.i('삭제할 댓글 없음');
+        return;
+      }
+      
+      final batch = _firestore.batch();
+      for (final doc in commentsQuery.docs) {
+        batch.delete(doc.reference);
+      }
+      
+      await batch.commit();
+      _logger.i('댓글 ${commentsQuery.docs.length}개 삭제 완료');
+    } catch (e) {
+      _logger.e('댓글 삭제 실패: $e');
+      rethrow;
+    }
+  }
+  
+  // 사용자 서브컬렉션 삭제 (팔로우, 북마크 등)
+  Future<void> _deleteUserSubcollections(String userId) async {
+    final batch = _firestore.batch();
+    int deleteCount = 0;
+    
+    try {
+      // 팔로잉 목록 삭제
+      final followingQuery = await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('following')
+          .limit(50)
+          .get();
+      
+      for (final doc in followingQuery.docs) {
+        batch.delete(doc.reference);
+        deleteCount++;
+      }
+      
+      // 팔로워 목록 삭제
+      final followersQuery = await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('followers')
+          .limit(50)
+          .get();
+      
+      for (final doc in followersQuery.docs) {
+        batch.delete(doc.reference);
+        deleteCount++;
+      }
+      
+      // 북마크 삭제
+      final bookmarksQuery = await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('bookmarks')
+          .limit(50)
+          .get();
+      
+      for (final doc in bookmarksQuery.docs) {
+        batch.delete(doc.reference);
+        deleteCount++;
+      }
+      
+      if (deleteCount > 0) {
+        await batch.commit();
+        _logger.i('서브컬렉션 $deleteCount개 삭제 완료');
+      } else {
+        _logger.i('삭제할 서브컬렉션 없음');
+      }
+    } catch (e) {
+      _logger.e('서브컬렉션 삭제 실패: $e');
+      rethrow;
     }
   }
 }

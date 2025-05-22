@@ -1,15 +1,17 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:math' as math;
 import '../../../constants/app_colors.dart';
+import '../../../services/notification_service.dart';
 
-class SplashScreen extends StatefulWidget {
+class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMixin {
+class _SplashScreenState extends ConsumerState<SplashScreen> with TickerProviderStateMixin {
   late AnimationController _fadeController;
   late AnimationController _starsController;
   late Animation<double> _fadeAnimation;
@@ -58,6 +60,29 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
     // 애니메이션 시작
     _fadeController.forward();
     _starsController.repeat(reverse: true);
+    
+    // 알림 서비스 초기화 (중요: 스플래시 화면에서 초기화)
+    _initializeNotificationService();
+  }
+  
+  // 알림 서비스 초기화 메서드 추가
+  Future<void> _initializeNotificationService() async {
+    try {
+      debugPrint('스플래시 화면에서 알림 서비스 초기화 시작');
+      
+      // 위젯이 완전히 빌드된 후 실행
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        try {
+          final notificationService = ref.read(notificationServiceProvider);
+          await notificationService.initialize();
+          debugPrint('스플래시 화면에서 알림 서비스 초기화 완료');
+        } catch (e) {
+          debugPrint('스플래시 화면에서 알림 서비스 초기화 실패: $e');
+        }
+      });
+    } catch (e) {
+      debugPrint('알림 서비스 초기화 중 오류: $e');
+    }
   }
   
   // 랜덤 별 생성 함수

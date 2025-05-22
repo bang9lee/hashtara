@@ -474,11 +474,11 @@ class _CreatePostScreenState extends ConsumerState<CreatePostScreen> {
                                   ),
                                   const SizedBox(width: 16),
                                   // 텍스트 영역
-                                  Column(
+                                  const Column(
                                     mainAxisSize: MainAxisSize.min,
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
-                                    children: const [
+                                    children: [
                                       Text(
                                         '사진 추가하기',
                                         style: TextStyle(

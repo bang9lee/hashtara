@@ -1,127 +1,137 @@
 import 'package:flutter/cupertino.dart';
 
-/// NotificationHelpers 클래스는 알림 관련 네비게이션 로직을 서비스 클래스에서 분리하여
-/// 화면 위젯 생성 및 네비게이션 처리를 담당합니다.
+// 알림 관련 헬퍼 함수들
 class NotificationHelpers {
-  
-  /// 알림 유형에 따른 화면 이동을 처리합니다.
+  // 알림 타입에 따라 해당 화면으로 네비게이션
   static void navigateToScreenByType(BuildContext context, String? type, String targetId) {
-    // 루트 네비게이터 사용 (탭 내부 네비게이터가 아닌)
+    if (type == null || targetId.isEmpty) {
+      debugPrint('알림 타입 또는 targetId가 없습니다.');
+      return;
+    }
+    
     switch (type) {
       case 'comment':
       case 'reply':
       case 'like':
-        // 게시물 화면으로 이동
-        Navigator.of(context, rootNavigator: true).push(
-          CupertinoPageRoute(
-            builder: (context) => _buildPostDetailScreen(targetId),
-            settings: RouteSettings(name: '/post/$targetId'),
-          ),
-        );
-        debugPrint('게시물 화면으로 이동: $targetId (루트 네비게이터 사용)');
-        break;
-        
-      case 'message':
-        // 메시지 화면으로 이동
-        Navigator.of(context, rootNavigator: true).push(
-          CupertinoPageRoute(
-            builder: (context) => _buildChatDetailScreen(targetId),
-            settings: RouteSettings(name: '/chat/$targetId'),
-          ),
-        );
-        debugPrint('채팅 화면으로 이동: $targetId (루트 네비게이터 사용)');
+        // 게시물 상세 화면으로 이동
+        _navigateToPost(context, targetId);
         break;
         
       case 'follow':
-        // 사용자 프로필 화면으로 이동
-        Navigator.of(context, rootNavigator: true).push(
-          CupertinoPageRoute(
-            builder: (context) => _buildProfileScreen(targetId),
-            settings: RouteSettings(name: '/profile/$targetId'),
-          ),
-        );
-        debugPrint('사용자 프로필 화면으로 이동: $targetId (루트 네비게이터 사용)');
+        // 프로필 화면으로 이동
+        _navigateToProfile(context, targetId);
+        break;
+        
+      case 'message':
+        // 채팅 화면으로 이동
+        _navigateToChat(context, targetId);
         break;
         
       default:
-        // 'open_page' 액션이 있는지 확인 후 처리
-        debugPrint('알 수 없는 알림 유형: $type');
+        debugPrint('알 수 없는 알림 타입: $type');
         break;
     }
   }
   
-  /// 알림에서 특정 페이지로 이동하는 처리를 합니다.
-  static void navigateToPageFromAction(BuildContext context, Map<String, dynamic> data) {
-    final action = data['action'] as String?;
-    
-    if (action == null) return;
-    
-    switch (action) {
-      case 'open_url':
-        final url = data['url'] as String?;
-        if (url != null) {
-          debugPrint('URL 열기: $url');
-          // URL 열기 로직 구현 (별도 구현 필요)
-        }
-        break;
-      
-      case 'open_page':
-        final page = data['page'] as String?;
-        if (page != null) {
-          debugPrint('페이지 열기: $page');
-          // 전역 네비게이터 사용
-          Navigator.of(context, rootNavigator: true).pushNamed('/$page');
-        }
-        break;
-      
+  // 게시물 상세 화면으로 이동
+  static void _navigateToPost(BuildContext context, String postId) {
+    try {
+      Navigator.of(context).pushNamed('/post/$postId');
+    } catch (e) {
+      debugPrint('게시물 화면 이동 실패: $e');
+      // 대체 방법으로 라우트 이름 사용
+      _showErrorDialog(context, '게시물을 불러올 수 없습니다.');
+    }
+  }
+  
+  // 프로필 화면으로 이동
+  static void _navigateToProfile(BuildContext context, String userId) {
+    try {
+      Navigator.of(context).pushNamed('/profile/$userId');
+    } catch (e) {
+      debugPrint('프로필 화면 이동 실패: $e');
+      _showErrorDialog(context, '프로필을 불러올 수 없습니다.');
+    }
+  }
+  
+  // 채팅 화면으로 이동
+  static void _navigateToChat(BuildContext context, String chatId) {
+    try {
+      Navigator.of(context).pushNamed('/chat/$chatId');
+    } catch (e) {
+      debugPrint('채팅 화면 이동 실패: $e');
+      _showErrorDialog(context, '채팅을 불러올 수 없습니다.');
+    }
+  }
+  
+  // 오류 다이얼로그 표시
+  static void _showErrorDialog(BuildContext context, String message) {
+    showCupertinoDialog(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: const Text('오류'),
+        content: Text(message),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  // 알림 타입별 아이콘 가져오기
+  static IconData getNotificationIcon(String type) {
+    switch (type) {
+      case 'comment':
+        return CupertinoIcons.chat_bubble;
+      case 'reply':
+        return CupertinoIcons.reply;
+      case 'like':
+        return CupertinoIcons.heart;
+      case 'follow':
+        return CupertinoIcons.person_add;
+      case 'message':
+        return CupertinoIcons.envelope;
       default:
-        debugPrint('알 수 없는 커스텀 알림 액션: $action');
-        break;
+        return CupertinoIcons.bell;
     }
   }
   
-  // 게시물 상세 화면
-  static Widget _buildPostDetailScreen(String postId) {
-    // 게시물 상세 화면 위젯 반환 (실제 앱에 맞게 구현)
-    // 예: return PostDetailScreen(postId: postId);
-    // 임시 구현
-    return CupertinoPageScaffold(
-      navigationBar: const CupertinoNavigationBar(
-        middle: Text('게시물'),
-      ),
-      child: Center(
-        child: Text('게시물 $postId 상세 화면'),
-      ),
-    );
+  // 알림 타입별 색상 가져오기
+  static Color getNotificationColor(String type) {
+    switch (type) {
+      case 'comment':
+        return CupertinoColors.systemBlue;
+      case 'reply':
+        return CupertinoColors.systemPurple;
+      case 'like':
+        return CupertinoColors.systemPink;
+      case 'follow':
+        return CupertinoColors.systemGreen;
+      case 'message':
+        return CupertinoColors.systemOrange;
+      default:
+        return CupertinoColors.systemGrey;
+    }
   }
-
-  // 채팅 상세 화면
-  static Widget _buildChatDetailScreen(String chatId) {
-    // 채팅 상세 화면 위젯 반환 (실제 앱에 맞게 구현)
-    // 예: return ChatDetailScreen(chatId: chatId);
-    // 임시 구현
-    return CupertinoPageScaffold(
-      navigationBar: const CupertinoNavigationBar(
-        middle: Text('채팅'),
-      ),
-      child: Center(
-        child: Text('채팅 $chatId 상세 화면'),
-      ),
-    );
-  }
-
-  // 사용자 프로필 화면
-  static Widget _buildProfileScreen(String userId) {
-    // 프로필 화면 위젯 반환 (실제 앱에 맞게 구현)
-    // 예: return ProfileScreen(userId: userId);
-    // 임시 구현
-    return CupertinoPageScaffold(
-      navigationBar: const CupertinoNavigationBar(
-        middle: Text('프로필'),
-      ),
-      child: Center(
-        child: Text('사용자 $userId 프로필 화면'),
-      ),
-    );
+  
+  // 시간 형식 변환 (상대적 시간)
+  static String formatRelativeTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+    
+    if (difference.inDays > 7) {
+      return '${dateTime.month}/${dateTime.day}';
+    } else if (difference.inDays > 0) {
+      return '${difference.inDays}일 전';
+    } else if (difference.inHours > 0) {
+      return '${difference.inHours}시간 전';
+    } else if (difference.inMinutes > 0) {
+      return '${difference.inMinutes}분 전';
+    } else {
+      return '방금 전';
+    }
   }
 }

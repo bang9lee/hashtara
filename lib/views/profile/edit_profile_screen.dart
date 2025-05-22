@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // Firebase Auth 직접 사용을 위해 추가
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import '../../../constants/app_colors.dart';
@@ -8,6 +9,9 @@ import '../../../providers/profile_provider.dart';
 import '../common/custom_text_field.dart';
 import '../auth/login_screen.dart';
 import '../feed/notification_settings_screen.dart';
+
+// main.dart의 navigatorKey 가져오기
+import '../../../main.dart' as main_file;
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   final String userId;
@@ -33,7 +37,6 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   
   File? _profileImage;
   bool _isLoading = false;
-  bool _isProcessing = false; // 로그아웃 또는 회원탈퇴 진행 중
   String? _errorMessage;
   String? _currentProfileImageUrl;
   
@@ -264,13 +267,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     );
   }
   
-  // 로그아웃 처리 함수
+  // 🔥 완전히 새로운 로그아웃 처리 함수 - Firebase Auth 직접 사용
   Future<void> _handleLogout() async {
-    // 로그아웃 전 최종 확인을 위한 다이얼로그 표시 - BuildContext 캡처
-    final BuildContext currentContext = context;
-    
     showCupertinoDialog(
-      context: currentContext,
+      context: context,
       builder: (dialogContext) => CupertinoAlertDialog(
         title: const Text('로그아웃'),
         content: const Text('정말 로그아웃 하시겠습니까?'),
@@ -281,53 +281,29 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
           ),
           CupertinoDialogAction(
             isDestructiveAction: true,
-            onPressed: () async {
+            onPressed: () {
               // 다이얼로그 닫기
               Navigator.of(dialogContext).pop();
               
-              // 로그아웃 진행 상태 설정
-              setState(() {
-                _isProcessing = true;
-              });
+              debugPrint('🔥🔥🔥 즉시 로그아웃 및 네비게이션');
               
+              // 🔥 즉시 Firebase에서 로그아웃 (프로바이더 거치지 않고)
               try {
-                await ref.read(authControllerProvider.notifier).signOut();
-                
-                // Future.microtask를 사용하여 위젯 빌드 주기 외부에서 실행
-                Future.microtask(() {
-                  // 로그아웃 성공 시 로그인 화면으로 이동
-                  if (mounted) {
-                    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-                      CupertinoPageRoute(
-                        builder: (context) => const LoginScreen(),
-                      ),
-                      (route) => false, // 모든 이전 화면 제거
-                    );
-                  }
-                });
+                FirebaseAuth.instance.signOut();
+                debugPrint('🔥 Firebase 직접 로그아웃 완료');
               } catch (e) {
-                // 로그아웃 실패 시 오류 표시
-                if (mounted) {
-                  setState(() {
-                    _isProcessing = false;
-                  });
-                  
-                  // 비동기 작업 이후에 새로운 BuildContext 사용
-                  if (!mounted) return;
-                  showCupertinoDialog(
-                    context: context,
-                    builder: (errorDialogContext) => CupertinoAlertDialog(
-                      title: const Text('오류'),
-                      content: Text('로그아웃 중 오류가 발생했습니다: $e'),
-                      actions: [
-                        CupertinoDialogAction(
-                          child: const Text('확인'),
-                          onPressed: () => Navigator.of(errorDialogContext).pop(),
-                        ),
-                      ],
-                    ),
-                  );
-                }
+                debugPrint('🔥 Firebase 로그아웃 에러 무시: $e');
+              }
+              
+              // 🔥 즉시 로그인 화면으로 이동
+              if (main_file.navigatorKey.currentState != null) {
+                main_file.navigatorKey.currentState!.pushAndRemoveUntil(
+                  CupertinoPageRoute(
+                    builder: (context) => const LoginScreen(),
+                  ),
+                  (route) => false, // 모든 이전 화면 제거
+                );
+                debugPrint('🔥 즉시 로그인 화면 이동 완료');
               }
             },
             child: const Text('로그아웃'),
@@ -337,13 +313,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     );
   }
   
-  // 회원 탈퇴 함수 추가
+  // 🔥 완전히 새로운 회원 탈퇴 함수 - Firebase Auth 직접 사용
   Future<void> _handleDeleteAccount() async {
-    // 회원탈퇴 전 최종 확인을 위한 다이얼로그 표시
-    final BuildContext currentContext = context;
-    
     showCupertinoDialog(
-      context: currentContext,
+      context: context,
       builder: (dialogContext) => CupertinoAlertDialog(
         title: const Text('회원 탈퇴'),
         content: const Text(
@@ -357,53 +330,29 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
           ),
           CupertinoDialogAction(
             isDestructiveAction: true,
-            onPressed: () async {
+            onPressed: () {
               // 다이얼로그 닫기
               Navigator.of(dialogContext).pop();
               
-              // 회원탈퇴 처리 상태 설정
-              setState(() {
-                _isProcessing = true;
-              });
+              debugPrint('🔥🔥🔥 즉시 회원탈퇴 및 네비게이션');
               
+              // 🔥 즉시 Firebase에서 로그아웃 (프로바이더 거치지 않고)
               try {
-                await ref.read(authControllerProvider.notifier).deleteAccount();
-                
-                // Future.microtask를 사용하여 위젯 빌드 주기 외부에서 실행
-                Future.microtask(() {
-                  // 회원탈퇴 성공 시 로그인 화면으로 이동
-                  if (mounted) {
-                    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-                      CupertinoPageRoute(
-                        builder: (context) => const LoginScreen(),
-                      ),
-                      (route) => false, // 모든 이전 화면 제거
-                    );
-                  }
-                });
+                FirebaseAuth.instance.signOut();
+                debugPrint('🔥 Firebase 직접 로그아웃 완료');
               } catch (e) {
-                // 회원탈퇴 실패 시 오류 표시
-                if (mounted) {
-                  setState(() {
-                    _isProcessing = false;
-                  });
-                  
-                  // 비동기 작업 이후에 새로운 BuildContext 사용
-                  if (!mounted) return;
-                  showCupertinoDialog(
-                    context: context,
-                    builder: (errorDialogContext) => CupertinoAlertDialog(
-                      title: const Text('오류'),
-                      content: Text('회원탈퇴 중 오류가 발생했습니다: $e'),
-                      actions: [
-                        CupertinoDialogAction(
-                          child: const Text('확인'),
-                          onPressed: () => Navigator.of(errorDialogContext).pop(),
-                        ),
-                      ],
-                    ),
-                  );
-                }
+                debugPrint('🔥 Firebase 로그아웃 에러 무시: $e');
+              }
+              
+              // 🔥 즉시 로그인 화면으로 이동
+              if (main_file.navigatorKey.currentState != null) {
+                main_file.navigatorKey.currentState!.pushAndRemoveUntil(
+                  CupertinoPageRoute(
+                    builder: (context) => const LoginScreen(),
+                  ),
+                  (route) => false, // 모든 이전 화면 제거
+                );
+                debugPrint('🔥 즉시 로그인 화면 이동 완료');
               }
             },
             child: const Text('회원탈퇴'),
@@ -415,27 +364,6 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   
   @override
   Widget build(BuildContext context) {
-    if (_isProcessing) {
-      return const CupertinoPageScaffold(
-        navigationBar: CupertinoNavigationBar(
-          middle: Text('처리 중...'),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CupertinoActivityIndicator(),
-              SizedBox(height: 16),
-              Text(
-                '요청을 처리하는 중입니다...',
-                style: TextStyle(color: AppColors.textEmphasis),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
         middle: const Text('프로필 편집'),

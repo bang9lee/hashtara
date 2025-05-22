@@ -14,6 +14,9 @@ import '../feed/chat_detail_screen.dart';
 import '../feed/hashtag_channel_detail_screen.dart';
 import '../feed/hashtag_explore_screen.dart';
 
+// main.dart의 navigatorKey 가져오기
+import '../../../main.dart' as main_file;
+
 class ProfileScreen extends ConsumerStatefulWidget {
   final String userId;
   
@@ -67,12 +70,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  // 로그아웃 처리 함수
+  // 🔥 강력한 로그아웃 처리 함수
   Future<void> _handleLogout() async {
-    final BuildContext currentContext = context;
-    
     showCupertinoDialog(
-      context: currentContext,
+      context: context,
       builder: (dialogContext) => CupertinoAlertDialog(
         title: const Text('로그아웃'),
         content: const Text('정말 로그아웃 하시겠습니까?'),
@@ -91,34 +92,53 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               });
               
               try {
+                debugPrint('🔥 강력한 로그아웃 시도 시작');
+                
+                // 1. AuthController의 강력한 signOut 사용
                 await ref.read(authControllerProvider.notifier).signOut();
                 
-                if (!mounted) return;
-                Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-                  CupertinoPageRoute(
-                    builder: (context) => const LoginScreen(),
-                  ),
-                  (route) => false,
-                );
-              } catch (e) {
-                if (!mounted) return;
-                setState(() {
-                  _isLoggingOut = false;
-                });
+                // 2. 추가 대기 시간
+                await Future.delayed(const Duration(milliseconds: 200));
                 
-                showCupertinoDialog(
-                  context: context,
-                  builder: (errorContext) => CupertinoAlertDialog(
-                    title: const Text('오류'),
-                    content: Text('로그아웃 중 오류가 발생했습니다: $e'),
-                    actions: [
-                      CupertinoDialogAction(
-                        child: const Text('확인'),
-                        onPressed: () => Navigator.of(errorContext).pop(),
+                debugPrint('🔥 로그아웃 완료, 강제 네비게이션 시작');
+                
+                // 3. 확실한 네비게이션 처리
+                if (main_file.navigatorKey.currentState != null) {
+                  main_file.navigatorKey.currentState!.pushAndRemoveUntil(
+                    CupertinoPageRoute(
+                      builder: (context) => const LoginScreen(),
+                    ),
+                    (route) => false, // 모든 이전 화면 제거
+                  );
+                  debugPrint('🔥 글로벌 네비게이터로 로그인 화면 이동 완료');
+                } else if (mounted) {
+                  Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+                    CupertinoPageRoute(
+                      builder: (context) => const LoginScreen(),
+                    ),
+                    (route) => false,
+                  );
+                  debugPrint('🔥 로컬 네비게이터로 로그인 화면 이동 완료');
+                }
+                
+              } catch (e) {
+                debugPrint('🔥 로그아웃 실패: $e');
+                
+                // 실패해도 강제로 로그인 화면으로 이동
+                if (mounted) {
+                  setState(() {
+                    _isLoggingOut = false;
+                  });
+                  
+                  if (main_file.navigatorKey.currentState != null) {
+                    main_file.navigatorKey.currentState!.pushAndRemoveUntil(
+                      CupertinoPageRoute(
+                        builder: (context) => const LoginScreen(),
                       ),
-                    ],
-                  ),
-                );
+                      (route) => false,
+                    );
+                  }
+                }
               }
             },
             child: const Text('로그아웃'),

@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../repositories/auth_repository.dart';
 import '../models/user_model.dart';
@@ -8,6 +9,7 @@ import '../models/user_model.dart';
 // 로컬 저장소 키 상수
 const String kSignupProgressKey = 'signup_progress_state';
 const String kSignupUserIdKey = 'signup_user_id';
+const String kDeletedAccountKey = 'deleted_account_flag';
 
 // 회원가입 진행 상태를 로컬에 저장하는 함수
 Future<void> saveSignupProgress(SignupProgress progress, String? userId) async {
@@ -57,89 +59,151 @@ Future<void> clearSignupProgress() async {
   }
 }
 
+// 탈퇴 계정 플래그 저장
+Future<void> markAccountAsDeleted(String userId) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(kDeletedAccountKey, userId);
+    debugPrint('탈퇴 계정 플래그 저장: $userId');
+  } catch (e) {
+    debugPrint('탈퇴 계정 플래그 저장 실패: $e');
+  }
+}
+
+// 탈퇴 계정 플래그 확인
+Future<bool> isAccountDeleted(String userId) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final deletedUserId = prefs.getString(kDeletedAccountKey);
+    return deletedUserId == userId;
+  } catch (e) {
+    debugPrint('탈퇴 계정 플래그 확인 실패: $e');
+    return false;
+  }
+}
+
+// 탈퇴 계정 플래그 제거
+Future<void> clearDeletedAccountFlag() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(kDeletedAccountKey);
+    debugPrint('탈퇴 계정 플래그 제거됨');
+  } catch (e) {
+    debugPrint('탈퇴 계정 플래그 제거 실패: $e');
+  }
+}
+
 // 인증 저장소 프로바이더
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
   return AuthRepository();
 });
 
-// 인증 상태 프로바이더 (로그인 여부)
+// 인증 상태 프로바이더
 final authStateProvider = StreamProvider<User?>((ref) {
-  final repository = ref.watch(authRepositoryProvider);
-  debugPrint('인증 상태 프로바이더 초기화됨');
-  return repository.authStateChanges;
+  debugPrint('🔥 AuthState Provider 초기화');
+  return FirebaseAuth.instance.authStateChanges();
 });
 
-// 현재 로그인한 사용자 프로바이더
+// 🔥 구글 로그인 문제 해결을 위한 강화된 현재 사용자 프로바이더
 final currentUserProvider = FutureProvider<UserModel?>((ref) async {
-  final repository = ref.watch(authRepositoryProvider);
   final authState = ref.watch(authStateProvider);
-  
-  debugPrint('현재 사용자 프로바이더 실행됨');
+  final repository = ref.watch(authRepositoryProvider);
   
   return authState.when(
     data: (user) async {
-      if (user != null) {
-        debugPrint('사용자 프로필 로드 시도: ${user.uid}');
-        UserModel? userModel = await repository.getUserProfile(user.uid);
-        
-        // 사용자 정보가 없는 경우 기본 사용자 정보 생성
-        if (userModel == null) {
-          debugPrint('기존 사용자 정보 없음, 기본 정보 생성 시도');
-          try {
-            // 기본 사용자 정보 생성 시도
-            final timestamp = DateTime.now().millisecondsSinceEpoch.toString().substring(6, 10);
-            const defaultName = 'User';
-            final defaultUsername = 'user_$timestamp';
-            
-            // 프로필 정보 생성
-            await repository.createUserDocument(
-              user.uid,
-              defaultName,
-              defaultUsername,
-              null // 프로필 이미지 없음
-            );
-            
-            // 다시 사용자 정보 로드
-            userModel = await repository.getUserProfile(user.uid);
-            debugPrint('기본 사용자 정보 생성 완료');
-          } catch (e) {
-            debugPrint('기본 사용자 정보 생성 실패: $e');
-          }
-        }
-        
-        return userModel;
+      if (user == null) {
+        debugPrint('🔥 사용자 로그인되지 않음');
+        return null;
       }
-      debugPrint('로그인된 사용자 없음');
-      return null;
+      
+      debugPrint('🔥 로그인된 사용자: ${user.uid}');
+      
+      // 탈퇴 계정 체크
+      final isDeleted = await isAccountDeleted(user.uid);
+      if (isDeleted) {
+        debugPrint('🔥 탈퇴 계정 감지, 강제 로그아웃');
+        await FirebaseAuth.instance.signOut();
+        await clearDeletedAccountFlag();
+        return null;
+      }
+      
+      // 🔥 사용자 문서 확인
+      DocumentSnapshot? userDoc;
+      try {
+        userDoc = await repository.firestore.collection('users').doc(user.uid).get();
+        debugPrint('🔥 사용자 문서 존재 여부: ${userDoc.exists}');
+      } catch (e) {
+        debugPrint('🔥 사용자 문서 조회 실패: $e');
+        return null;
+      }
+      
+      // 🔥 사용자 문서가 없으면 신규 가입자
+      if (!userDoc.exists) {
+        debugPrint('🔥🔥🔥 사용자 문서 없음 - 신규 가입자 확정');
+        ref.read(signupProgressProvider.notifier).state = SignupProgress.registered;
+        await saveSignupProgress(SignupProgress.registered, user.uid);
+        return null;
+      }
+      
+      // 🔥 사용자 문서가 존재하는 경우 - 약관/프로필 상태 확인
+      final userData = userDoc.data() as Map<String, dynamic>?;
+      if (userData == null) {
+        debugPrint('🔥 사용자 문서 데이터가 null');
+        ref.read(signupProgressProvider.notifier).state = SignupProgress.registered;
+        await saveSignupProgress(SignupProgress.registered, user.uid);
+        return null;
+      }
+      
+      final termsAgreed = userData['termsAgreed'] == true;
+      final profileComplete = userData['profileComplete'] == true;
+      
+      debugPrint('🔥 기존 사용자 상태: 약관동의=$termsAgreed, 프로필완료=$profileComplete');
+      
+      // 약관 동의가 안된 경우
+      if (!termsAgreed) {
+        debugPrint('🔥 약관 동의 필요');
+        ref.read(signupProgressProvider.notifier).state = SignupProgress.registered;
+        await saveSignupProgress(SignupProgress.registered, user.uid);
+        return null;
+      }
+      
+      // 프로필 설정이 안된 경우
+      if (!profileComplete) {
+        debugPrint('🔥 프로필 설정 필요');
+        ref.read(signupProgressProvider.notifier).state = SignupProgress.termsAgreed;
+        await saveSignupProgress(SignupProgress.termsAgreed, user.uid);
+        return null;
+      }
+      
+      // 🔥 모든 조건을 만족하는 경우 - 사용자 모델 로드
+      debugPrint('🔥 완료된 사용자 - 사용자 모델 로드');
+      try {
+        final userModel = await repository.getUserProfile(user.uid);
+        if (userModel != null) {
+          ref.read(signupProgressProvider.notifier).state = SignupProgress.completed;
+          await saveSignupProgress(SignupProgress.completed, user.uid);
+          debugPrint('🔥🔥🔥 사용자 모델 로드 성공: ${userModel.id}');
+          return userModel;
+        } else {
+          debugPrint('🔥 사용자 모델이 없음 - 프로필 설정 다시 필요');
+          ref.read(signupProgressProvider.notifier).state = SignupProgress.termsAgreed;
+          await saveSignupProgress(SignupProgress.termsAgreed, user.uid);
+          return null;
+        }
+      } catch (e) {
+        debugPrint('🔥 사용자 모델 로드 에러: $e');
+        return null;
+      }
     },
-    loading: () {
-      debugPrint('authState 로딩 중...');
-      return null;
-    },
-    error: (error, stack) {
-      debugPrint('authState 에러: $error');
-      return null;
-    },
+    loading: () => null,
+    error: (_, __) => null,
   );
 });
 
-// 사용자 프로필 조회 프로바이더 - 전역으로 정의하여 어디서나 접근 가능하게 함
+// 사용자 프로필 조회 프로바이더
 final getUserProfileProvider = FutureProvider.family<UserModel?, String>((ref, userId) {
   final repository = ref.watch(authRepositoryProvider);
-  debugPrint('사용자 프로필 조회 프로바이더 실행: $userId');
   return repository.getUserProfile(userId);
-});
-
-// 프로필 설정 완료 여부 확인 프로바이더
-final isProfileCompleteProvider = FutureProvider.family<bool, String>((ref, userId) {
-  final repository = ref.watch(authRepositoryProvider);
-  return repository.isProfileComplete(userId);
-});
-
-// 이용약관 동의 여부 확인 프로바이더
-final isTermsAgreedProvider = FutureProvider.family<bool, String>((ref, userId) async {
-  final repository = ref.watch(authRepositoryProvider);
-  return await repository.isTermsAgreed(userId);
 });
 
 // 회원가입 진행 상태를 위한 프로바이더
@@ -151,23 +215,6 @@ enum SignupProgress {
   registered,  // 회원가입만 완료된 상태 (약관 동의 필요)
   termsAgreed, // 약관 동의까지 완료된 상태 (프로필 설정 필요)
   completed    // 모든 가입 절차 완료
-}
-
-// 인증 네비게이션 상태 프로바이더
-final authNavigationStateProvider = StateProvider<AuthNavigationState>((ref) => 
-  AuthNavigationState());
-
-// 인증 네비게이션 상태 클래스
-class AuthNavigationState {
-  final String? targetRoute;
-  final String? userId;
-  final bool isNavigating;
-  
-  AuthNavigationState({
-    this.targetRoute, 
-    this.userId, 
-    this.isNavigating = false
-  });
 }
 
 // 로그인 상태 관리 프로바이더
@@ -184,14 +231,11 @@ class AuthController extends StateNotifier<AsyncValue<void>> {
   
   // 회원가입 상태 업데이트 및 저장 메서드
   Future<void> updateAndSaveSignupProgress(SignupProgress progress, String? userId) async {
-    // 메모리 상태 업데이트
     _ref.read(signupProgressProvider.notifier).state = progress;
     
-    // 로컬 저장소에 상태 저장
     if (progress != SignupProgress.none && userId != null) {
       await saveSignupProgress(progress, userId);
-    } else if (progress == SignupProgress.none || progress == SignupProgress.completed) {
-      // 초기 상태나 완료 상태면 로컬 저장소 상태 정리
+    } else {
       await clearSignupProgress();
     }
   }
@@ -201,93 +245,65 @@ class AuthController extends StateNotifier<AsyncValue<void>> {
     state = const AsyncValue.loading();
     
     try {
-      debugPrint('로그인 시도: $email');
-      final userCredential = await _repository.signInWithEmailAndPassword(email, password);
-      
-      // 로그인 성공 시 사용자 확인 및 상태 업데이트
-      await _updateSignupProgressState();
-      
+      debugPrint('🔥 로그인 시도: $email');
+      await _repository.signInWithEmailAndPassword(email, password);
+      await clearDeletedAccountFlag();
       state = const AsyncValue.data(null);
-      debugPrint('로그인 성공: ${userCredential.user?.uid}');
+      debugPrint('🔥 로그인 성공');
     } catch (e, stack) {
-      debugPrint('로그인 실패: $e');
+      debugPrint('🔥 로그인 실패: $e');
       state = AsyncValue.error(e, stack);
     }
   }
   
-  // 사용자 로그인 상태에 따라 회원가입 진행 상태 업데이트
-  Future<void> _updateSignupProgressState() async {
-    try {
-      final user = _repository.currentUser;
-      if (user == null) {
-        debugPrint('현재 로그인된 사용자 없음');
-        await updateAndSaveSignupProgress(SignupProgress.none, null);
-        return;
-      }
-      
-      // 병렬로 데이터 요청하여 성능 개선
-      final results = await Future.wait([
-        _repository.isTermsAgreed(user.uid),
-        _repository.isProfileComplete(user.uid)
-      ]);
-      
-      final isTermsAgreed = results[0];
-      final isProfileComplete = results[1];
-      
-      debugPrint('사용자 상태 확인: 약관동의=$isTermsAgreed, 프로필완료=$isProfileComplete');
-      
-      SignupProgress progress;
-      if (!isTermsAgreed) {
-        debugPrint('약관 동의 필요 상태로 설정');
-        progress = SignupProgress.registered;
-      } else if (!isProfileComplete) {
-        debugPrint('프로필 설정 필요 상태로 설정');
-        progress = SignupProgress.termsAgreed;
-      } else {
-        debugPrint('모든 가입 절차 완료 상태로 설정');
-        progress = SignupProgress.completed;
-      }
-      
-      await updateAndSaveSignupProgress(progress, user.uid);
-    } catch (e) {
-      debugPrint('회원가입 진행 상태 업데이트 실패: $e');
-      
-      // 오류 시 로컬 저장소 데이터 복원 시도
-      try {
-        final savedState = await loadSignupProgress();
-        if (savedState['userId'] != null) {
-          _ref.read(signupProgressProvider.notifier).state = savedState['progress'];
-        } else {
-          _ref.read(signupProgressProvider.notifier).state = SignupProgress.none;
-        }
-      } catch (_) {
-        _ref.read(signupProgressProvider.notifier).state = SignupProgress.none;
-      }
-    }
-  }
-  
-  // 구글 로그인 - 통합된 메서드
+  // 🔥 구글 로그인 - 완전히 새로 작성
   Future<UserCredential?> signInWithGoogle() async {
     state = const AsyncValue.loading();
     
     try {
-      debugPrint('구글 로그인 시도');
+      debugPrint('🔥 구글 로그인 시도');
       final result = await _repository.signInWithGoogle();
-      state = const AsyncValue.data(null);
-      debugPrint('구글 로그인 성공: ${result.user?.uid}');
+      await clearDeletedAccountFlag();
       
-      // 신규 사용자인 경우 상태 저장
-      if (result.additionalUserInfo?.isNewUser == true && result.user != null) {
-        debugPrint('신규 사용자 감지, 약관 동의 필요 상태로 설정');
-        await updateAndSaveSignupProgress(SignupProgress.registered, result.user!.uid);
-      } else if (result.user != null) {
-        // 기존 사용자의 경우 상태 업데이트
-        await _updateSignupProgressState();
+      if (result.user != null) {
+        debugPrint('🔥 구글 로그인 성공: ${result.user!.uid}');
+        
+        // 🔥 사용자 문서 존재 여부 확인
+        final userDoc = await _repository.firestore.collection('users').doc(result.user!.uid).get();
+        
+        if (!userDoc.exists) {
+          debugPrint('🔥🔥🔥 구글 로그인 - 신규 가입자: 약관 동의부터 시작');
+          await updateAndSaveSignupProgress(SignupProgress.registered, result.user!.uid);
+        } else {
+          debugPrint('🔥 구글 로그인 - 기존 사용자: 상태 확인');
+          
+          // 기존 사용자의 경우 약관/프로필 상태 확인
+          final userData = userDoc.data();
+          final termsAgreed = userData?['termsAgreed'] == true;
+          final profileComplete = userData?['profileComplete'] == true;
+          
+          if (!termsAgreed) {
+            debugPrint('🔥 구글 로그인 - 약관 동의 필요');
+            await updateAndSaveSignupProgress(SignupProgress.registered, result.user!.uid);
+          } else if (!profileComplete) {
+            debugPrint('🔥 구글 로그인 - 프로필 설정 필요');
+            await updateAndSaveSignupProgress(SignupProgress.termsAgreed, result.user!.uid);
+          } else {
+            debugPrint('🔥 구글 로그인 - 모든 설정 완료');
+            await updateAndSaveSignupProgress(SignupProgress.completed, result.user!.uid);
+          }
+        }
+        
+        // 🔥 프로바이더 강제 갱신
+        _ref.invalidate(currentUserProvider);
+        await Future.delayed(const Duration(milliseconds: 100));
+        _ref.invalidate(currentUserProvider);
       }
       
+      state = const AsyncValue.data(null);
       return result;
     } catch (e, stack) {
-      debugPrint('구글 로그인 실패: $e');
+      debugPrint('🔥 구글 로그인 실패: $e');
       state = AsyncValue.error(e, stack);
       return null;
     }
@@ -298,19 +314,18 @@ class AuthController extends StateNotifier<AsyncValue<void>> {
     state = const AsyncValue.loading();
     
     try {
-      debugPrint('회원가입 시도: $email');
+      debugPrint('🔥 회원가입 시도: $email');
       final user = await _repository.signUpWithEmailAndPassword(email, password);
       
-      // 회원가입 성공 시 상태 저장
       if (user != null) {
         await updateAndSaveSignupProgress(SignupProgress.registered, user.uid);
       }
       
       state = const AsyncValue.data(null);
-      debugPrint('회원가입 성공: ${user?.uid}');
+      debugPrint('🔥 회원가입 성공: ${user?.uid}');
       return user;
     } catch (e, stack) {
-      debugPrint('회원가입 실패: $e');
+      debugPrint('🔥 회원가입 실패: $e');
       state = AsyncValue.error(e, stack);
       return null;
     }
@@ -319,54 +334,115 @@ class AuthController extends StateNotifier<AsyncValue<void>> {
   // 약관 동의 완료
   Future<void> completeTermsAgreement(String userId) async {
     try {
-      // 약관 동의 상태를 Firestore에 업데이트
+      debugPrint('🔥 약관 동의 처리 시작: $userId');
+      
+      // 1. 약관 동의 상태 업데이트
       await _repository.updateTermsAgreement(userId, true);
       
-      // 회원가입 진행 상태 업데이트 및 저장
+      // 2. 기본 사용자 문서가 없으면 생성
+      final userDoc = await _repository.firestore.collection('users').doc(userId).get();
+      if (!userDoc.exists) {
+        debugPrint('🔥 사용자 문서가 없어서 기본 문서 생성');
+        
+        final timestamp = DateTime.now().millisecondsSinceEpoch.toString().substring(6, 10);
+        const defaultName = 'User';
+        final defaultUsername = 'user_$timestamp';
+        
+        await _repository.createUserDocument(
+          userId,
+          defaultName,
+          defaultUsername,
+          null,
+        );
+        
+        debugPrint('🔥 기본 사용자 문서 생성 완료');
+      }
+      
+      // 3. 상태 업데이트
       await updateAndSaveSignupProgress(SignupProgress.termsAgreed, userId);
       
-      debugPrint('약관 동의 완료 처리 성공: $userId');
+      // 4. 프로바이더 강제 갱신
+      _ref.invalidate(currentUserProvider);
+      await Future.delayed(const Duration(milliseconds: 300));
+      _ref.invalidate(currentUserProvider);
+      
+      debugPrint('🔥 약관 동의 완료: $userId');
     } catch (e) {
-      debugPrint('약관 동의 완료 처리 실패: $e');
+      debugPrint('🔥 약관 동의 실패: $e');
       rethrow;
     }
   }
   
-  // 프로필 설정 완료
+  // 🔥 프로필 설정 완료 - 구글 로그인 문제 해결을 위해 강화
   Future<void> completeProfileSetup(String userId) async {
     try {
-      // 프로필 완료 상태를 Firestore에 업데이트
+      debugPrint('🔥🔥🔥 프로필 설정 완료 처리 시작: $userId');
+      
+      // 1. 프로필 완료 상태 업데이트
       await _repository.updateProfileComplete(userId, true);
+      debugPrint('🔥 Firestore 프로필 완료 상태 업데이트 완료');
       
-      // 회원가입 진행 상태 업데이트 및 저장
+      // 2. 상태 업데이트
       await updateAndSaveSignupProgress(SignupProgress.completed, userId);
+      debugPrint('🔥 로컬 상태 업데이트 완료');
       
-      // 현재 사용자 정보 갱신 - 반환값을 변수에 할당하여 lint 경고 제거
-      final refreshResult = _ref.refresh(currentUserProvider);
-      debugPrint('사용자 정보 갱신 결과: ${refreshResult.hashCode}');
+      // 3. 🔥 강력한 프로바이더 갱신 (여러 번)
+      _ref.invalidate(currentUserProvider);
+      await Future.delayed(const Duration(milliseconds: 200));
       
-      debugPrint('프로필 설정 완료 처리 성공: $userId');
+      _ref.invalidate(currentUserProvider);
+      await Future.delayed(const Duration(milliseconds: 300));
+      
+      _ref.invalidate(currentUserProvider);
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // 4. 🔥 사용자 정보 다시 로드 확인
+      try {
+        final userModel = await _repository.getUserProfile(userId);
+        debugPrint('🔥 프로필 설정 완료 후 사용자 모델 확인: ${userModel?.id}');
+      } catch (e) {
+        debugPrint('🔥 사용자 모델 로드 확인 실패: $e');
+      }
+      
+      debugPrint('🔥🔥🔥 프로필 설정 완료: $userId');
     } catch (e) {
-      debugPrint('프로필 설정 완료 처리 실패: $e');
+      debugPrint('🔥 프로필 설정 실패: $e');
       rethrow;
     }
   }
   
-  // 로그아웃
+  // 강력한 로그아웃
   Future<void> signOut() async {
     state = const AsyncValue.loading();
     
     try {
-      debugPrint('로그아웃 시도');
+      debugPrint('🔥🔥🔥 강력한 로그아웃 시작');
+      
+      _ref.read(signupProgressProvider.notifier).state = SignupProgress.none;
+      await clearSignupProgress();
+      
       await _repository.signOut();
       
-      // 회원가입 진행 상태 초기화 및 저장소 정리
-      await updateAndSaveSignupProgress(SignupProgress.none, null);
+      _ref.invalidate(currentUserProvider);
+      _ref.invalidate(authStateProvider);
+      
+      await Future.delayed(const Duration(milliseconds: 100));
+      _ref.invalidate(currentUserProvider);
+      _ref.invalidate(authStateProvider);
       
       state = const AsyncValue.data(null);
-      debugPrint('로그아웃 성공');
+      debugPrint('🔥🔥🔥 강력한 로그아웃 완료');
+      
     } catch (e, stack) {
-      debugPrint('로그아웃 실패: $e');
+      debugPrint('🔥🔥🔥 로그아웃 실패: $e');
+      
+      try {
+        _ref.read(signupProgressProvider.notifier).state = SignupProgress.none;
+        await clearSignupProgress();
+        _ref.invalidate(currentUserProvider);
+        _ref.invalidate(authStateProvider);
+      } catch (_) {}
+      
       state = AsyncValue.error(e, stack);
     }
   }
@@ -375,17 +451,51 @@ class AuthController extends StateNotifier<AsyncValue<void>> {
   Future<void> deleteAccount() async {
     state = const AsyncValue.loading();
     
+    final user = _repository.currentUser;
+    String? userId = user?.uid;
+    
     try {
-      debugPrint('회원 탈퇴 시도');
-      await _repository.deleteAccount();
+      debugPrint('🔥 회원 탈퇴 시도: $userId');
       
-      // 회원가입 진행 상태 초기화 및 저장소 정리
+      if (userId != null) {
+        await markAccountAsDeleted(userId);
+      }
+      
       await updateAndSaveSignupProgress(SignupProgress.none, null);
+      _ref.invalidate(currentUserProvider);
+      _ref.invalidate(authStateProvider);
+      
+      try {
+        await _repository.deleteAccount();
+      } catch (e) {
+        debugPrint('🔥 계정 삭제 실패하지만 계속 진행: $e');
+      }
+      
+      try {
+        await _repository.signOut();
+      } catch (e) {
+        debugPrint('🔥 강제 로그아웃 실패: $e');
+      }
+      
+      _ref.invalidate(currentUserProvider);
+      _ref.invalidate(authStateProvider);
       
       state = const AsyncValue.data(null);
-      debugPrint('회원 탈퇴 성공');
+      debugPrint('🔥 회원 탈퇴 완료');
+      
     } catch (e, stack) {
-      debugPrint('회원 탈퇴 실패: $e');
+      debugPrint('🔥 회원 탈퇴 실패: $e');
+      
+      try {
+        if (userId != null) {
+          await markAccountAsDeleted(userId);
+        }
+        await updateAndSaveSignupProgress(SignupProgress.none, null);
+        await _repository.signOut();
+        _ref.invalidate(currentUserProvider);
+        _ref.invalidate(authStateProvider);
+      } catch (_) {}
+      
       state = AsyncValue.error(e, stack);
     }
   }
@@ -400,7 +510,7 @@ class AuthController extends StateNotifier<AsyncValue<void>> {
     state = const AsyncValue.loading();
     
     try {
-      debugPrint('사용자 프로필 업데이트 시도: $userId');
+      debugPrint('🔥 프로필 업데이트: $userId');
       final currentUser = await _repository.getUserProfile(userId);
       
       if (currentUser != null) {
@@ -412,39 +522,18 @@ class AuthController extends StateNotifier<AsyncValue<void>> {
         
         await _repository.updateUserProfile(updatedUser);
         
-        // 사용자 데이터 갱신 - 반환값을 변수에 할당하여 lint 경고 제거
+        // unused result 해결
         final refreshResult = _ref.refresh(currentUserProvider);
-        debugPrint('사용자 정보 갱신 결과: ${refreshResult.hashCode}');
+        debugPrint('프로바이더 갱신 결과: ${refreshResult.hashCode}');
         
         state = const AsyncValue.data(null);
-        debugPrint('사용자 프로필 업데이트 성공');
+        debugPrint('🔥 프로필 업데이트 성공');
       } else {
         throw Exception('사용자를 찾을 수 없습니다.');
       }
     } catch (e, stack) {
-      debugPrint('사용자 프로필 업데이트 실패: $e');
+      debugPrint('🔥 프로필 업데이트 실패: $e');
       state = AsyncValue.error(e, stack);
-    }
-  }
-  
-  // 현재 인증 상태 새로고침
-  Future<void> refreshAuthState() async {
-    try {
-      final user = _repository.currentUser;
-      if (user != null) {
-        await _updateSignupProgressState();
-        
-        // 사용자 정보 명시적 갱신 - 반환값을 변수에 할당하여 lint 경고 제거
-        final refreshResult = _ref.refresh(currentUserProvider);
-        debugPrint('사용자 정보 갱신 결과: ${refreshResult.hashCode}');
-        
-        debugPrint('인증 상태 새로고침 완료: ${user.uid}');
-      } else {
-        debugPrint('로그인된 사용자 없음, 인증 상태 초기화');
-        await updateAndSaveSignupProgress(SignupProgress.none, null);
-      }
-    } catch (e) {
-      debugPrint('인증 상태 새로고침 실패: $e');
     }
   }
 }

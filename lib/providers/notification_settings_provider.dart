@@ -56,6 +56,9 @@ class NotificationSettingsNotifier extends StateNotifier<AsyncValue<Map<String, 
         
         // FCM 토큰 제거 (알림 비활성화)
         await _notificationService.deleteToken();
+      } else {
+        // 알림이 활성화된 경우 FCM 토큰 설정
+        await _notificationService.setupFCMToken();
       }
       
       // SharedPreferences에 저장
@@ -88,7 +91,6 @@ class NotificationSettingsNotifier extends StateNotifier<AsyncValue<Map<String, 
         currentSettings['all_notifications'] = true;
         
         // FCM 토큰 설정 (알림 활성화)
-        // _setupFCMToken 대신 public 메소드인 setupFCMToken 사용
         await _notificationService.setupFCMToken();
       }
       
@@ -135,7 +137,6 @@ class NotificationSettingsNotifier extends StateNotifier<AsyncValue<Map<String, 
       }
       
       // FCM 토큰 설정 갱신
-      // _setupFCMToken 대신 public 메소드인 setupFCMToken 사용
       await _notificationService.setupFCMToken();
       
       state = AsyncValue.data(defaultSettings);
