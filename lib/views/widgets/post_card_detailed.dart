@@ -3,9 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../constants/app_colors.dart';
 import '../../../models/post_model.dart';
 import '../../../providers/profile_provider.dart';
+import '../../../providers/hashtag_channel_provider.dart';
 import '../widgets/user_avatar.dart';
 import '../../views/profile/profile_screen.dart';
+import '../../views/feed/hashtag_channel_detail_screen.dart';
+import '../../views/feed/hashtag_explore_screen.dart';
 import '../feed/photo_view_screen.dart';
+
 
 class PostCardDetailed extends ConsumerStatefulWidget {
   final PostModel post;
@@ -189,7 +193,7 @@ class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
               ),
             ),
 
-          // 해시태그
+          // 해시태그 - 클릭 가능하게 수정
           if (widget.post.hashtags != null && widget.post.hashtags!.isNotEmpty)
             Padding(
               padding:
@@ -197,12 +201,15 @@ class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
               child: Wrap(
                 spacing: 8.0,
                 children: widget.post.hashtags!.map((tag) {
-                  return Text(
-                    tag,
-                    style: const TextStyle(
-                      color: AppColors.secondaryBlue,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
+                  return GestureDetector(
+                    onTap: () => _handleHashtagTap(tag),
+                    child: Text(
+                      tag,
+                      style: const TextStyle(
+                        color: AppColors.secondaryBlue,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   );
                 }).toList(),
@@ -236,6 +243,58 @@ class _PostCardDetailedState extends ConsumerState<PostCardDetailed> {
         ],
       ),
     );
+  }
+
+  // 해시태그 눌렀을 때 해시태그 채널로 이동
+  void _handleHashtagTap(String hashtag) async {
+    // # 기호 제거
+    final tagName = hashtag.startsWith('#') ? hashtag.substring(1) : hashtag;
+    
+    try {
+      // 해시태그 채널 검색
+      final channelRepository = ref.read(hashtagChannelRepositoryProvider);
+      final channels = await channelRepository.searchChannels(tagName);
+      
+      if (!mounted) return;
+      
+      // 동일한 이름의 채널이 있으면 바로 이동
+      final matchedChannel = channels.where(
+        (channel) => channel.name.toLowerCase() == tagName.toLowerCase()
+      ).toList();
+      
+      if (!mounted) return;
+      
+      if (matchedChannel.isNotEmpty) {
+        // 일치하는 채널이 있으면 바로 상세 페이지로 이동
+        Navigator.push(
+          context,
+          CupertinoPageRoute(
+            builder: (context) => HashtagChannelDetailScreen(
+              channelId: matchedChannel.first.id,
+              channelName: matchedChannel.first.name,
+            ),
+          ),
+        );
+      } else {
+        // 일치하는 채널이 없으면 검색 화면으로 이동
+        Navigator.push(
+          context,
+          CupertinoPageRoute(
+            builder: (context) => const HashtagExploreScreen(),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      
+      // 오류 발생 시 검색 화면으로 이동
+      Navigator.push(
+        context,
+        CupertinoPageRoute(
+          builder: (context) => const HashtagExploreScreen(),
+        ),
+      );
+    }
   }
 
   // 게시 시간 포맷팅

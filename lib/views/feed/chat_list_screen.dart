@@ -5,7 +5,9 @@ import '../../../constants/app_colors.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/chat_provider.dart';
 import '../../../providers/profile_provider.dart';
+import '../../../models/chat_model.dart';
 import 'chat_detail_screen.dart';
+import 'chat_request_screen.dart';
 
 class ChatsListScreen extends ConsumerStatefulWidget {
   const ChatsListScreen({Key? key}) : super(key: key);
@@ -22,17 +24,67 @@ class _ChatsListScreenState extends ConsumerState<ChatsListScreen> {
     
     return CupertinoPageScaffold(
       backgroundColor: AppColors.darkBackground,
-      navigationBar: const CupertinoNavigationBar(
+      navigationBar: CupertinoNavigationBar(
         backgroundColor: AppColors.primaryPurple,
-        border: Border(
+        border: const Border(
           bottom: BorderSide(color: AppColors.separator),
         ),
-        middle: Text(
+        middle: const Text(
           '메시지',
           style: TextStyle(
             color: AppColors.white,
             fontWeight: FontWeight.bold,
           ),
+        ),
+        trailing: currentUserAsync.maybeWhen(
+          data: (currentUser) {
+            if (currentUser == null) return null;
+            
+            // 읽지 않은 채팅 요청 수
+            final unreadRequestsAsync = ref.watch(unreadChatRequestsCountProvider(currentUser.id));
+            
+            return CupertinoButton(
+              padding: EdgeInsets.zero,
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  CupertinoPageRoute(
+                    builder: (context) => const ChatRequestScreen(),
+                  ),
+                );
+              },
+              child: Stack(
+                children: [
+                  const Icon(
+                    CupertinoIcons.envelope,
+                    color: AppColors.white,
+                  ),
+                  // 읽지 않은 요청이 있으면 빨간 점 표시
+                  unreadRequestsAsync.maybeWhen(
+                    data: (count) {
+                      if (count > 0) {
+                        return Positioned(
+                          right: 0,
+                          top: 0,
+                          child: Container(
+                            width: 8,
+                            height: 8,
+                            decoration: const BoxDecoration(
+                              color: AppColors.accentRed,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    },
+                    orElse: () => const SizedBox.shrink(),
+                  ),
+                ],
+              ),
+            );
+          },
+          orElse: () => null,
         ),
       ),
       child: SafeArea(
@@ -136,7 +188,7 @@ class _ChatsListScreenState extends ConsumerState<ChatsListScreen> {
   // 채팅방 목록 아이템 위젯
   Widget _buildChatListItem(
     BuildContext context, 
-    dynamic chat,
+    ChatModel chat,
     String currentUserId,
     String otherUserId,
   ) {
@@ -187,7 +239,7 @@ class _ChatsListScreenState extends ConsumerState<ChatsListScreen> {
   
   Widget _buildChatItem(
     BuildContext context, 
-    dynamic chat, 
+    ChatModel chat, 
     String chatName, 
     String? imageUrl, 
     String currentUserId,
@@ -200,6 +252,9 @@ class _ChatsListScreenState extends ConsumerState<ChatsListScreen> {
       // 실제로는 readBy 상태를 확인해야 함
       hasUnreadMessages = true;
     }
+    
+    // 사용자가 나간 채팅방인지 확인
+    final hasUserLeft = chat.hasUserLeft(currentUserId);
     
     return GestureDetector(
       onTap: () {
@@ -220,9 +275,9 @@ class _ChatsListScreenState extends ConsumerState<ChatsListScreen> {
           horizontal: 16.0, 
           vertical: 12.0,
         ),
-        decoration: const BoxDecoration(
-          color: AppColors.darkBackground,
-          border: Border(
+        decoration: BoxDecoration(
+          color: hasUserLeft ? AppColors.darkBackground.withValues(alpha: 0.5) : AppColors.darkBackground,
+          border: const Border(
             bottom: BorderSide(
               color: AppColors.separator,
               width: 0.5,
@@ -275,17 +330,41 @@ class _ChatsListScreenState extends ConsumerState<ChatsListScreen> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(
-                          chatName,
-                          style: TextStyle(
-                            color: AppColors.white,
-                            fontSize: 16,
-                            fontWeight: hasUnreadMessages
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        child: Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                chatName,
+                                style: TextStyle(
+                                  color: hasUserLeft ? AppColors.textSecondary : AppColors.white,
+                                  fontSize: 16,
+                                  fontWeight: hasUnreadMessages && !hasUserLeft
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (hasUserLeft) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.mediumGray,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  '나감',
+                                  style: TextStyle(
+                                    color: AppColors.textSecondary,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                       Text(
@@ -304,11 +383,13 @@ class _ChatsListScreenState extends ConsumerState<ChatsListScreen> {
                         child: Text(
                           chat.lastMessageText ?? '새로운 대화가 시작되었습니다',
                           style: TextStyle(
-                            color: hasUnreadMessages
-                                ? AppColors.white
-                                : AppColors.textSecondary,
+                            color: hasUserLeft 
+                                ? AppColors.textSecondary.withValues(alpha: 0.7)
+                                : (hasUnreadMessages
+                                    ? AppColors.white
+                                    : AppColors.textSecondary),
                             fontSize: 14,
-                            fontWeight: hasUnreadMessages
+                            fontWeight: hasUnreadMessages && !hasUserLeft
                                 ? FontWeight.w500
                                 : FontWeight.normal,
                           ),
@@ -316,7 +397,7 @@ class _ChatsListScreenState extends ConsumerState<ChatsListScreen> {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      if (hasUnreadMessages)
+                      if (hasUnreadMessages && !hasUserLeft)
                         Container(
                           width: 10,
                           height: 10,

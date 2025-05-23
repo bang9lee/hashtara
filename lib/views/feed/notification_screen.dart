@@ -7,6 +7,7 @@ import '../../providers/notification_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/notification_service.dart';
 import 'notification_helpers.dart';
+import 'chat_request_screen.dart';
 
 class NotificationScreen extends ConsumerStatefulWidget {
   const NotificationScreen({Key? key}) : super(key: key);
@@ -90,6 +91,7 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
                   return _buildEmptyNotifications();
                 }
                 
+                // 🔥 수정: 모든 알림을 보여주되, 읽음/안읽음 상태를 시각적으로 구분
                 return _buildNotificationList(notificationList);
               },
               loading: () => const Center(
@@ -203,7 +205,7 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
     );
   }
   
-  // 알림 목록
+  // 🔥 수정: 알림 목록 - 모든 알림을 보여주되 읽음/안읽음 상태를 시각적으로 구분
   Widget _buildNotificationList(List<NotificationModel> notifications) {
     return ListView.separated(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -246,6 +248,7 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
           _handleNotificationTap(notification);
         },
         child: Container(
+          // 🔥 수정: 읽음 상태에 따라 배경색 다르게 설정
           color: notification.isRead 
             ? AppColors.darkBackground 
             : AppColors.primaryPurple.withAlpha(25),
@@ -266,6 +269,7 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
                       notification.title,
                       style: TextStyle(
                         color: AppColors.white,
+                        // 🔥 수정: 읽지 않은 알림은 굵게, 읽은 알림은 일반으로
                         fontWeight: notification.isRead ? FontWeight.normal : FontWeight.bold,
                         fontSize: 16,
                       ),
@@ -273,8 +277,9 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
                     const SizedBox(height: 4),
                     Text(
                       notification.body,
-                      style: const TextStyle(
-                        color: AppColors.textSecondary,
+                      style: TextStyle(
+                        // 🔥 수정: 읽지 않은 알림은 더 진한 색상으로
+                        color: notification.isRead ? AppColors.textSecondary : AppColors.textEmphasis,
                         fontSize: 14,
                       ),
                       maxLines: 2,
@@ -291,6 +296,7 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
                   ],
                 ),
               ),
+              // 🔥 수정: 읽지 않은 알림에만 점 표시
               if (!notification.isRead)
                 Container(
                   width: 8,
@@ -307,7 +313,7 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
     );
   }
   
-  // 알림 아이콘
+  // 알림 아이콘 - chatRequest 케이스 추가
   Widget _buildNotificationIcon(NotificationType type) {
     IconData iconData;
     Color iconColor;
@@ -333,6 +339,10 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
         iconData = CupertinoIcons.envelope_fill;
         iconColor = CupertinoColors.systemOrange;
         break;
+      case NotificationType.chatRequest:
+        iconData = CupertinoIcons.envelope_badge;
+        iconColor = AppColors.accentYellow;
+        break;
       case NotificationType.other:
         iconData = CupertinoIcons.bell_fill;
         iconColor = AppColors.textEmphasis;
@@ -354,7 +364,7 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
     );
   }
   
-  // 알림 클릭 처리
+  // 🔥 수정: 알림 클릭 처리 - chatRequest 타입 처리 추가
   void _handleNotificationTap(NotificationModel notification) {
     // 1. 알림을 읽음 표시
     if (!notification.isRead) {
@@ -363,17 +373,72 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
     }
     
     // 2. 알림 타입에 따라 다른 화면으로 이동
-    final data = notification.data;
-    final targetId = data['targetId'] as String?;
-    
-    if (targetId == null) {
-      debugPrint('알림에 targetId가 없습니다: ${notification.id}');
+    if (notification.type == NotificationType.chatRequest) {
+      // 채팅 요청 알림인 경우 채팅 요청 화면으로 이동
+      Navigator.push(
+        context,
+        CupertinoPageRoute(
+          builder: (context) => const ChatRequestScreen(),
+        ),
+      );
       return;
     }
     
-    // 헬퍼 클래스를 사용하여 네비게이션 처리
-    final type = notification.data['type'] as String?;
-    NotificationHelpers.navigateToScreenByType(context, type, targetId);
+    // 3. 다른 타입의 알림 처리
+    final data = notification.data;
+    final targetId = data['targetId'] as String?;
+    
+    if (targetId == null || targetId.isEmpty) {
+      debugPrint('알림에 targetId가 없습니다: ${notification.id}');
+      _showErrorToast('알림 정보가 올바르지 않습니다');
+      return;
+    }
+    
+    // 🔥 수정: 네비게이션 에러 처리 강화
+    try {
+      final type = notification.data['type'] as String?;
+      NotificationHelpers.navigateToScreenByType(context, type, targetId);
+    } catch (e) {
+      debugPrint('알림 네비게이션 에러: $e');
+      _showErrorToast('페이지를 불러올 수 없습니다');
+    }
+  }
+  
+  // 🔥 추가: 에러 토스트 메시지 표시
+  void _showErrorToast(String message) {
+    final overlay = Navigator.of(context).overlay;
+    if (overlay == null) return;
+
+    final toast = OverlayEntry(
+      builder: (context) => Positioned(
+        bottom: 100,
+        left: 0,
+        right: 0,
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            decoration: BoxDecoration(
+              color: CupertinoColors.systemRed.withAlpha(230),
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: CupertinoColors.white,
+                fontSize: 16,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    overlay.insert(toast);
+
+    // 2초 후 토스트 메시지 제거
+    Future.delayed(const Duration(seconds: 2), () {
+      toast.remove();
+    });
   }
   
   // 시간 포맷 함수

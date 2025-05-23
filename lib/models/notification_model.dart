@@ -2,12 +2,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 // 알림 유형 열거
 enum NotificationType {
-  comment,  // 게시물에 댓글
-  reply,    // 댓글에 대댓글
-  like,     // 좋아요
-  follow,   // 팔로우
-  message,  // 메시지
-  other     // 기타
+  comment,      // 게시물에 댓글
+  reply,        // 댓글에 대댓글
+  like,         // 좋아요
+  follow,       // 팔로우
+  message,      // 메시지
+  chatRequest,  // 채팅 요청
+  other         // 기타
 }
 
 // 알림 모델 클래스
@@ -108,6 +109,8 @@ class NotificationModel {
         return 'follow';
       case NotificationType.message:
         return 'message';
+      case NotificationType.chatRequest:
+        return 'chatRequest';
       case NotificationType.other:
         return 'other';
     }
@@ -126,6 +129,8 @@ class NotificationModel {
         return NotificationType.follow;
       case 'message':
         return NotificationType.message;
+      case 'chatRequest':
+        return NotificationType.chatRequest;
       default:
         return NotificationType.other;
     }

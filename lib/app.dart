@@ -10,6 +10,11 @@ import 'views/feed/main_tab_screen.dart';
 import 'providers/auth_provider.dart';
 import 'services/notification_service.dart';
 
+// 🔥 실제 화면 클래스들 import 추가
+import 'views/feed/post_detail_screen.dart';
+import 'views/profile/profile_screen.dart';
+import 'views/feed/chat_detail_screen.dart';
+
 // main.dart의 navigatorKey 가져오기
 import 'main.dart' as main_file;
 
@@ -120,7 +125,7 @@ class _HashtaraAppState extends ConsumerState<HashtaraApp> with WidgetsBindingOb
         '/splash': (context) => const SplashScreen(),
       },
       
-      // 동적 라우트 처리
+      // 🔥 수정: 동적 라우트 처리 - 실제 화면 클래스 사용
       onGenerateRoute: (settings) {
         debugPrint('라우트 생성: ${settings.name}');
         
@@ -144,7 +149,10 @@ class _HashtaraAppState extends ConsumerState<HashtaraApp> with WidgetsBindingOb
             final chatId = pathSegments[1];
             return CupertinoPageRoute(
               settings: settings,
-              builder: (context) => ChatDetailScreen(chatId: chatId),
+              builder: (context) => ChatDetailScreen(
+                chatId: chatId,
+                chatName: '채팅', // 기본값, 실제로는 채팅방 정보에서 가져와야 함
+              ),
             );
           }
         }
@@ -268,60 +276,5 @@ class NavigationLogger extends NavigatorObserver {
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
     debugPrint('Navigation: REPLACED ${oldRoute?.settings.name ?? oldRoute.toString()} WITH ${newRoute?.settings.name ?? newRoute.toString()}');
     super.didReplace(newRoute: newRoute, oldRoute: oldRoute);
-  }
-}
-
-// 임시 화면 위젯들
-class PostDetailScreen extends StatelessWidget {
-  final String postId;
-  
-  const PostDetailScreen({Key? key, required this.postId}) : super(key: key);
-  
-  @override
-  Widget build(BuildContext context) {
-    return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
-        middle: Text('게시물 $postId'),
-      ),
-      child: Center(
-        child: Text('게시물 $postId 상세 화면'),
-      ),
-    );
-  }
-}
-
-class ProfileScreen extends StatelessWidget {
-  final String userId;
-  
-  const ProfileScreen({Key? key, required this.userId}) : super(key: key);
-  
-  @override
-  Widget build(BuildContext context) {
-    return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
-        middle: Text('프로필 $userId'),
-      ),
-      child: Center(
-        child: Text('사용자 $userId 프로필 화면'),
-      ),
-    );
-  }
-}
-
-class ChatDetailScreen extends StatelessWidget {
-  final String chatId;
-  
-  const ChatDetailScreen({Key? key, required this.chatId}) : super(key: key);
-  
-  @override
-  Widget build(BuildContext context) {
-    return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
-        middle: Text('채팅 $chatId'),
-      ),
-      child: Center(
-        child: Text('채팅 $chatId 상세 화면'),
-      ),
-    );
   }
 }

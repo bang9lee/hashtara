@@ -7,7 +7,10 @@ import '../../../constants/app_colors.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/chat_provider.dart';
 import '../../../providers/profile_provider.dart';
+import '../../../models/chat_model.dart';
+import '../../../models/message_model.dart';
 import '../profile/profile_screen.dart';
+
 class ChatDetailScreen extends ConsumerStatefulWidget {
   final String chatId;
   final String chatName;
@@ -245,6 +248,9 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
     // 현재 로그인한 사용자
     final currentUser = ref.watch(currentUserProvider).valueOrNull;
     
+    // 채팅방 정보
+    final chatAsync = ref.watch(chatDetailProvider(widget.chatId));
+    
     // 채팅방 메시지 목록
     final messagesAsync = ref.watch(chatMessagesProvider(widget.chatId));
     
@@ -339,191 +345,342 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
         ),
       ),
       child: SafeArea(
-        child: Column(
-          children: [
-            // 메시지 목록
-            Expanded(
-              child: messagesAsync.when(
-                data: (messages) {
-                  if (messages.isEmpty) {
-                    return const Center(
-                      child: Text(
-                        '아직 메시지가 없습니다',
-                        style: TextStyle(color: AppColors.textEmphasis),
+        child: chatAsync.when(
+          data: (chat) {
+            if (chat == null) {
+              return const Center(
+                child: Text(
+                  '채팅방을 찾을 수 없습니다',
+                  style: TextStyle(color: AppColors.textEmphasis),
+                ),
+              );
+            }
+            
+            // 채팅방 상태 확인
+            if (chat.status == ChatStatus.pending) {
+              return _buildPendingChatUI(chat, currentUser);
+            }
+            
+            // 사용자가 나간 채팅방인지 확인
+            final hasUserLeft = currentUser != null && chat.hasUserLeft(currentUser.id);
+            
+            return Column(
+              children: [
+                // 채팅방 상태 배너 (필요한 경우)
+                if (hasUserLeft)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    color: AppColors.cardBackground,
+                    child: const Text(
+                      '나간 채팅방입니다. 메시지를 보낼 수 없습니다.',
+                      style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 14,
                       ),
-                    );
-                  }
-                  
-                  return ListView.builder(
-                    controller: _scrollController,
-                    reverse: true, // 최신 메시지가 아래쪽에 표시
-                    padding: const EdgeInsets.all(16.0),
-                    itemCount: messages.length,
-                    itemBuilder: (context, index) {
-                      final message = messages[index];
-                      final isMe = currentUser?.id == message.senderId;
-                      
-                      // 이전 메시지와 시간 비교 (날짜 구분선 표시용)
-                      final showDateSeparator = index == messages.length - 1 || 
-                        !_isSameDay(messages[index].createdAt, messages[index + 1].createdAt);
-                      
-                      return Column(
-                        children: [
-                          if (showDateSeparator)
-                            _buildDateSeparator(message.createdAt),
-                          _buildMessageItem(
-                            context,
-                            message,
-                            isMe,
-                            ref,
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                
+                // 메시지 목록
+                Expanded(
+                  child: messagesAsync.when(
+                    data: (messages) {
+                      if (messages.isEmpty) {
+                        return const Center(
+                          child: Text(
+                            '아직 메시지가 없습니다',
+                            style: TextStyle(color: AppColors.textEmphasis),
                           ),
-                        ],
+                        );
+                      }
+                      
+                      return ListView.builder(
+                        controller: _scrollController,
+                        reverse: true, // 최신 메시지가 아래쪽에 표시
+                        padding: const EdgeInsets.all(16.0),
+                        itemCount: messages.length,
+                        itemBuilder: (context, index) {
+                          final message = messages[index];
+                          final isMe = currentUser?.id == message.senderId;
+                          
+                          // 이전 메시지와 시간 비교 (날짜 구분선 표시용)
+                          final showDateSeparator = index == messages.length - 1 || 
+                            !_isSameDay(messages[index].createdAt, messages[index + 1].createdAt);
+                          
+                          return Column(
+                            children: [
+                              if (showDateSeparator)
+                                _buildDateSeparator(message.createdAt),
+                              _buildMessageItem(
+                                context,
+                                message,
+                                isMe,
+                                ref,
+                              ),
+                            ],
+                          );
+                        },
                       );
                     },
-                  );
-                },
-                loading: () => const Center(
-                  child: CupertinoActivityIndicator(),
-                ),
-                error: (error, stack) => Center(
-                  child: Text(
-                    '메시지를 불러오는 중 오류가 발생했습니다: $error',
-                    style: const TextStyle(color: AppColors.textEmphasis),
-                  ),
-                ),
-              ),
-            ),
-            
-            // 선택된 이미지 미리보기
-            if (_selectedImages.isNotEmpty)
-              Container(
-                height: 100,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16.0,
-                  vertical: 8.0,
-                ),
-                color: AppColors.cardBackground,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _selectedImages.length,
-                  itemBuilder: (context, index) {
-                    return Stack(
-                      children: [
-                        Container(
-                          width: 80,
-                          height: 80,
-                          margin: const EdgeInsets.only(right: 8.0),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8.0),
-                            image: DecorationImage(
-                              image: FileImage(_selectedImages[index]),
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                        ),
-                        Positioned(
-                          top: 0,
-                          right: 8,
-                          child: GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _selectedImages.removeAt(index);
-                              });
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.all(4.0),
-                              decoration: const BoxDecoration(
-                                color: AppColors.lightGray,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                CupertinoIcons.clear,
-                                size: 16,
-                                color: AppColors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            
-            // 메시지 입력 영역
-            Container(
-              padding: const EdgeInsets.all(16.0),
-              color: AppColors.cardBackground,
-              child: Row(
-                children: [
-                  // 이미지 버튼
-                  CupertinoButton(
-                    padding: EdgeInsets.zero,
-                    onPressed: _pickImages,
-                    child: const Icon(
-                      CupertinoIcons.photo,
-                      color: AppColors.primaryPurple,
-                      size: 28,
+                    loading: () => const Center(
+                      child: CupertinoActivityIndicator(),
+                    ),
+                    error: (error, stack) => Center(
+                      child: Text(
+                        '메시지를 불러오는 중 오류가 발생했습니다: $error',
+                        style: const TextStyle(color: AppColors.textEmphasis),
+                      ),
                     ),
                   ),
-                  
-                  // 카메라 버튼
-                  CupertinoButton(
-                    padding: EdgeInsets.zero,
-                    onPressed: _takePicture,
-                    child: const Icon(
-                      CupertinoIcons.camera,
-                      color: AppColors.primaryPurple,
-                      size: 28,
-                    ),
-                  ),
-                  
-                  // 메시지 입력 필드
-                  Expanded(
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 8.0),
+                ),
+                
+                // 메시지 입력 영역 (나간 사용자나 대기 중인 채팅은 표시하지 않음)
+                if (!hasUserLeft && chat.status == ChatStatus.active) ...[
+                  // 선택된 이미지 미리보기
+                  if (_selectedImages.isNotEmpty)
+                    Container(
+                      height: 100,
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16.0,
                         vertical: 8.0,
                       ),
-                      decoration: BoxDecoration(
-                        color: AppColors.darkBackground,
-                        borderRadius: BorderRadius.circular(20.0),
-                      ),
-                      child: CupertinoTextField(
-                        controller: _messageController,
-                        placeholder: '메시지 입력...',
-                        decoration: const BoxDecoration(
-                          color: AppColors.darkBackground,
-                          border: null,
-                        ),
-                        style: const TextStyle(color: AppColors.white),
-                        placeholderStyle: const TextStyle(
-                          color: AppColors.textSecondary,
-                        ),
-                        maxLines: 5,
-                        minLines: 1,
-                        keyboardType: TextInputType.multiline,
-                        padding: EdgeInsets.zero,
+                      color: AppColors.cardBackground,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _selectedImages.length,
+                        itemBuilder: (context, index) {
+                          return Stack(
+                            children: [
+                              Container(
+                                width: 80,
+                                height: 80,
+                                margin: const EdgeInsets.only(right: 8.0),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(8.0),
+                                  image: DecorationImage(
+                                    image: FileImage(_selectedImages[index]),
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                top: 0,
+                                right: 8,
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      _selectedImages.removeAt(index);
+                                    });
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.all(4.0),
+                                    decoration: const BoxDecoration(
+                                      color: AppColors.lightGray,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(
+                                      CupertinoIcons.clear,
+                                      size: 16,
+                                      color: AppColors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
                     ),
-                  ),
                   
-                  // 전송 버튼
-                  CupertinoButton(
-                    padding: EdgeInsets.zero,
-                    onPressed: _isSending ? null : _sendMessage,
-                    child: _isSending
-                        ? const CupertinoActivityIndicator()
-                        : const Icon(
-                            CupertinoIcons.paperplane_fill,
+                  // 메시지 입력 영역
+                  Container(
+                    padding: const EdgeInsets.all(16.0),
+                    color: AppColors.cardBackground,
+                    child: Row(
+                      children: [
+                        // 이미지 버튼
+                        CupertinoButton(
+                          padding: EdgeInsets.zero,
+                          onPressed: _pickImages,
+                          child: const Icon(
+                            CupertinoIcons.photo,
                             color: AppColors.primaryPurple,
                             size: 28,
                           ),
+                        ),
+                        
+                        // 카메라 버튼
+                        CupertinoButton(
+                          padding: EdgeInsets.zero,
+                          onPressed: _takePicture,
+                          child: const Icon(
+                            CupertinoIcons.camera,
+                            color: AppColors.primaryPurple,
+                            size: 28,
+                          ),
+                        ),
+                        
+                        // 메시지 입력 필드
+                        Expanded(
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 8.0),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16.0,
+                              vertical: 8.0,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.darkBackground,
+                              borderRadius: BorderRadius.circular(20.0),
+                            ),
+                            child: CupertinoTextField(
+                              controller: _messageController,
+                              placeholder: '메시지 입력...',
+                              decoration: const BoxDecoration(
+                                color: AppColors.darkBackground,
+                                border: null,
+                              ),
+                              style: const TextStyle(color: AppColors.white),
+                              placeholderStyle: const TextStyle(
+                                color: AppColors.textSecondary,
+                              ),
+                              maxLines: 5,
+                              minLines: 1,
+                              keyboardType: TextInputType.multiline,
+                              padding: EdgeInsets.zero,
+                            ),
+                          ),
+                        ),
+                        
+                        // 전송 버튼
+                        CupertinoButton(
+                          padding: EdgeInsets.zero,
+                          onPressed: _isSending ? null : _sendMessage,
+                          child: _isSending
+                              ? const CupertinoActivityIndicator()
+                              : const Icon(
+                                  CupertinoIcons.paperplane_fill,
+                                  color: AppColors.primaryPurple,
+                                  size: 28,
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            );
+          },
+          loading: () => const Center(
+            child: CupertinoActivityIndicator(),
+          ),
+          error: (error, stack) => const Center(
+            child: Text(
+              '채팅방 정보를 불러오는 중 오류가 발생했습니다',
+              style: TextStyle(color: AppColors.textEmphasis),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  
+  // 대기 중인 채팅 UI (새로 추가)
+  Widget _buildPendingChatUI(ChatModel chat, dynamic currentUser) {
+    final isPendingForMe = currentUser != null && chat.receiverId == currentUser.id;
+    
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isPendingForMe ? CupertinoIcons.envelope : CupertinoIcons.clock,
+              size: 64,
+              color: AppColors.textSecondary,
+            ),
+            const SizedBox(height: 24),
+            Text(
+              isPendingForMe 
+                ? '채팅 요청을 받았습니다'
+                : '채팅 요청 대기 중',
+              style: const TextStyle(
+                color: AppColors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              isPendingForMe
+                ? '상대방이 대화를 시작하고 싶어합니다.'
+                : '상대방이 채팅 요청을 수락하면 대화를 시작할 수 있습니다.',
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 16,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            if (isPendingForMe) ...[
+              const SizedBox(height: 32),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CupertinoButton(
+                    color: AppColors.primaryPurple,
+                    onPressed: () async {
+                      try {
+                        await ref.read(chatControllerProvider.notifier).acceptChatRequest(
+                          chatId: chat.id,
+                          userId: currentUser.id,
+                        );
+                      } catch (e) {
+                        _showErrorDialog('오류', '채팅 요청 수락 중 오류가 발생했습니다: $e');
+                      }
+                    },
+                    child: const Text('수락'),
+                  ),
+                  const SizedBox(width: 16),
+                  CupertinoButton(
+                    color: AppColors.mediumGray,
+                    onPressed: () async {
+                      final confirmed = await showCupertinoDialog<bool>(
+                        context: context,
+                        builder: (context) => CupertinoAlertDialog(
+                          title: const Text('채팅 요청 거절'),
+                          content: const Text('정말로 이 채팅 요청을 거절하시겠습니까?'),
+                          actions: [
+                            CupertinoDialogAction(
+                              child: const Text('취소'),
+                              onPressed: () => Navigator.pop(context, false),
+                            ),
+                            CupertinoDialogAction(
+                              isDestructiveAction: true,
+                              child: const Text('거절'),
+                              onPressed: () => Navigator.pop(context, true),
+                            ),
+                          ],
+                        ),
+                      );
+                      
+                      if (confirmed == true) {
+                        try {
+                          await ref.read(chatControllerProvider.notifier).rejectChatRequest(
+                            chatId: chat.id,
+                            userId: currentUser.id,
+                          );
+                          if (mounted) Navigator.pop(context);
+                        } catch (e) {
+                          _showErrorDialog('오류', '채팅 요청 거절 중 오류가 발생했습니다: $e');
+                        }
+                      }
+                    },
+                    child: const Text('거절'),
                   ),
                 ],
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -571,13 +728,18 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
     );
   }
   
-  // 메시지 아이템
+  // 메시지 아이템 (수정된 버전 - 시스템 메시지 지원)
   Widget _buildMessageItem(
     BuildContext context,
     dynamic message,
     bool isMe,
     WidgetRef ref,
   ) {
+    // 시스템 메시지인 경우
+    if (message.type == MessageType.system || message.type == MessageType.chatRequest) {
+      return _buildSystemMessage(message);
+    }
+    
     final messageText = message.text;
     final messageImages = message.imageUrls;
     
@@ -703,6 +865,78 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
                   ),
                 ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+  
+  // 시스템 메시지 위젯 (새로 추가)
+  Widget _buildSystemMessage(dynamic message) {
+    IconData icon;
+    Color iconColor;
+    
+    // 시스템 메시지 타입에 따라 아이콘 설정
+    switch (message.systemType) {
+      case SystemMessageType.userJoined:
+        icon = CupertinoIcons.person_add;
+        iconColor = AppColors.iosSuccess;
+        break;
+      case SystemMessageType.userLeft:
+        icon = CupertinoIcons.person_badge_minus;
+        iconColor = AppColors.iosError;
+        break;
+      case SystemMessageType.chatAccepted:
+        icon = CupertinoIcons.checkmark_circle;
+        iconColor = AppColors.iosSuccess;
+        break;
+      case SystemMessageType.chatRejected:
+        icon = CupertinoIcons.xmark_circle;
+        iconColor = AppColors.iosError;
+        break;
+      case SystemMessageType.chatRequestSent:
+        icon = CupertinoIcons.paperplane;
+        iconColor = AppColors.primaryPurple;
+        break;
+      default:
+        icon = CupertinoIcons.info_circle;
+        iconColor = AppColors.textSecondary;
+    }
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            decoration: BoxDecoration(
+              color: AppColors.cardBackground.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(20.0),
+              border: Border.all(
+                color: AppColors.separator,
+                width: 0.5,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 16,
+                  color: iconColor,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  message.text ?? '',
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),

@@ -23,9 +23,15 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin, TickerProviderStateMixin {
   final RefreshController _refreshController =
       RefreshController(initialRefresh: false);
+
+  // 🔥 추가: 알림 아이콘 애니메이션을 위한 컨트롤러들
+  late AnimationController _pulseController;
+  late AnimationController _glowController;
+  late Animation<double> _pulseAnimation;
+  late Animation<double> _glowAnimation;
 
   @override
   bool get wantKeepAlive => true; // 상태 유지를 위한 설정
@@ -34,11 +40,47 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void initState() {
     super.initState();
     debugPrint('HomeScreen 초기화됨');
+    
+    // 🔥 추가: 애니메이션 컨트롤러 초기화
+    _pulseController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    );
+    
+    _glowController = AnimationController(
+      duration: const Duration(milliseconds: 2000),
+      vsync: this,
+    );
+    
+    // 🔥 추가: 펄스 애니메이션 (크기 변화)
+    _pulseAnimation = Tween<double>(
+      begin: 1.0,
+      end: 1.3,
+    ).animate(CurvedAnimation(
+      parent: _pulseController,
+      curve: Curves.easeInOut,
+    ));
+    
+    // 🔥 추가: 글로우 애니메이션 (불투명도 변화)
+    _glowAnimation = Tween<double>(
+      begin: 0.3,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _glowController,
+      curve: Curves.easeInOut,
+    ));
+    
+    // 🔥 추가: 무한 반복 애니메이션 시작
+    _pulseController.repeat(reverse: true);
+    _glowController.repeat(reverse: true);
   }
 
   @override
   void dispose() {
     _refreshController.dispose();
+    // 🔥 추가: 애니메이션 컨트롤러 해제
+    _pulseController.dispose();
+    _glowController.dispose();
     super.dispose();
   }
 
@@ -93,12 +135,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       orElse: () => null,
     );
 
-    // 안 읽은 알림 여부 확인
+    // 🔥 수정: 안 읽은 알림 개수도 함께 가져오기
     final hasUnreadNotifications = currentUser.maybeWhen(
       data: (user) => user != null
           ? ref.watch(hasUnreadNotificationsProvider(user.id))
           : const AsyncValue.data(false),
       orElse: () => const AsyncValue.data(false),
+    );
+    
+    final unreadCount = currentUser.maybeWhen(
+      data: (user) => user != null
+          ? ref.watch(unreadNotificationsCountProvider(user.id))
+          : const AsyncValue.data(0),
+      orElse: () => const AsyncValue.data(0),
     );
 
     return CupertinoPageScaffold(
@@ -138,44 +187,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
             const SizedBox(width: 8),
-            CupertinoButton(
-              padding: EdgeInsets.zero,
-              onPressed: () {
-                // 알림 화면으로 이동
-                Navigator.of(context).push(
-                  CupertinoPageRoute(
-                    builder: (context) => const NotificationScreen(),
-                  ),
-                );
-              },
-              child: Stack(
-                children: [
-                  const Icon(
-                    CupertinoIcons.bell,
-                    color: AppColors.white,
-                  ),
-                  // 안 읽은 알림이 있는 경우 빨간 점 표시
-                  hasUnreadNotifications.when(
-                    data: (hasUnread) => hasUnread
-                        ? Positioned(
-                            top: 0,
-                            right: 0,
-                            child: Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                color: AppColors.accentRed,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          )
-                        : const SizedBox.shrink(),
-                    loading: () => const SizedBox.shrink(),
-                    error: (_, __) => const SizedBox.shrink(),
-                  ),
-                ],
-              ),
-            ),
+            // 🔥 수정: 향상된 알림 버튼
+            _buildEnhancedNotificationButton(hasUnreadNotifications, unreadCount),
           ],
         ),
       ),
@@ -372,6 +385,145 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               _buildFeedPostsSection(feedPosts),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  // 🔥 새로 추가: 향상된 알림 버튼
+  Widget _buildEnhancedNotificationButton(
+    AsyncValue<bool> hasUnreadNotifications,
+    AsyncValue<int> unreadCount,
+  ) {
+    return CupertinoButton(
+      padding: EdgeInsets.zero,
+      onPressed: () {
+        // 알림 화면으로 이동
+        Navigator.of(context).push(
+          CupertinoPageRoute(
+            builder: (context) => const NotificationScreen(),
+          ),
+        );
+      },
+      child: SizedBox(
+        width: 32,
+        height: 32,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // 🔥 배경 글로우 효과 (알림이 있을 때만)
+            hasUnreadNotifications.when(
+              data: (hasUnread) => hasUnread
+                  ? AnimatedBuilder(
+                      animation: _glowAnimation,
+                      builder: (context, child) {
+                        return Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.primaryPurple.withAlpha((0.6 * 255 * _glowAnimation.value).round()),
+                                blurRadius: 8,
+                                spreadRadius: 2,
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    )
+                  : const SizedBox.shrink(),
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+            
+            // 🔥 벨 아이콘 (펄스 효과 포함)
+            hasUnreadNotifications.when(
+              data: (hasUnread) => hasUnread
+                  ? AnimatedBuilder(
+                      animation: _pulseAnimation,
+                      builder: (context, child) {
+                        return Transform.scale(
+                          scale: _pulseAnimation.value,
+                          child: const Icon(
+                            CupertinoIcons.bell_fill,
+                            color: AppColors.white,
+                            size: 24,
+                          ),
+                        );
+                      },
+                    )
+                  : const Icon(
+                      CupertinoIcons.bell,
+                      color: AppColors.white,
+                      size: 24,
+                    ),
+              loading: () => const Icon(
+                CupertinoIcons.bell,
+                color: AppColors.white,
+                size: 24,
+              ),
+              error: (_, __) => const Icon(
+                CupertinoIcons.bell,
+                color: AppColors.white,
+                size: 24,
+              ),
+            ),
+            
+            // 🔥 알림 개수 배지 (향상된 디자인)
+            Positioned(
+              top: 0,
+              right: 0,
+              child: unreadCount.when(
+                data: (count) => count > 0
+                    ? AnimatedBuilder(
+                        animation: _pulseAnimation,
+                        builder: (context, child) {
+                          return Transform.scale(
+                            scale: _pulseAnimation.value,
+                            child: Container(
+                              constraints: const BoxConstraints(minWidth: 16),
+                              height: 16,
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFFFF6B6B), // 밝은 빨간색
+                                    Color(0xFFFF4757), // 진한 빨간색
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFFFF4757).withAlpha((0.5 * 255).round()),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Center(
+                                child: Text(
+                                  count > 99 ? '99+' : count.toString(),
+                                  style: const TextStyle(
+                                    color: CupertinoColors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      )
+                    : const SizedBox.shrink(),
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -6,10 +6,13 @@ import '../../../models/post_model.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/feed_provider.dart';
 import '../../../providers/report_provider.dart';
+import '../../../providers/hashtag_channel_provider.dart';
 import '../widgets/user_avatar.dart';
 import '../../views/feed/post_detail_screen.dart';
 import '../../views/feed/edit_post_screen.dart';
 import '../../views/feed/photo_view_screen.dart';
+import '../../views/feed/hashtag_channel_detail_screen.dart';
+import '../../views/feed/hashtag_explore_screen.dart';
 import '../profile/profile_screen.dart';
 import '../../../providers/profile_provider.dart';
 
@@ -32,8 +35,8 @@ class PostCard extends ConsumerStatefulWidget {
 }
 
 class _PostCardState extends ConsumerState<PostCard> {
-  bool _isDeleting = false; // 삭제 처리 중 상태 추가
-  bool _isReporting = false; // 신고 처리 중 상태 추가
+  bool _isDeleting = false;
+  bool _isReporting = false;
 
   @override
   Widget build(BuildContext context) {
@@ -46,7 +49,6 @@ class _PostCardState extends ConsumerState<PostCard> {
       onTap: widget.isDetailView
           ? null
           : () {
-              // 수정된 부분: 루트 네비게이터 사용 제거, 현재 컨텍스트의 네비게이터 사용
               Navigator.of(context).push(
                 CupertinoPageRoute(
                   builder: (context) => PostDetailScreen(
@@ -235,7 +237,7 @@ class _PostCardState extends ConsumerState<PostCard> {
                 ),
               ),
 
-            // 해시태그
+            // 해시태그 - 클릭 가능하게 수정
             if (widget.post.hashtags != null &&
                 widget.post.hashtags!.isNotEmpty)
               Padding(
@@ -244,12 +246,15 @@ class _PostCardState extends ConsumerState<PostCard> {
                 child: Wrap(
                   spacing: 8.0,
                   children: widget.post.hashtags!.map((tag) {
-                    return Text(
-                      tag,
-                      style: const TextStyle(
-                        color: AppColors.primaryPurple,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
+                    return GestureDetector(
+                      onTap: () => _handleHashtagTap(tag),
+                      child: Text(
+                        tag,
+                        style: const TextStyle(
+                          color: AppColors.primaryPurple,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     );
                   }).toList(),
@@ -265,7 +270,6 @@ class _PostCardState extends ConsumerState<PostCard> {
                   // 댓글 버튼
                   GestureDetector(
                     onTap: () {
-                      // 수정된 부분: 루트 네비게이터 사용 제거
                       Navigator.of(context).push(
                         CupertinoPageRoute(
                           builder: (context) => PostDetailScreen(
@@ -294,7 +298,7 @@ class _PostCardState extends ConsumerState<PostCard> {
                     ),
                   const SizedBox(width: 16),
 
-                  // 공유 버튼 - 실제로 작동하는 기능 구현
+                  // 공유 버튼
                   GestureDetector(
                     onTap: () {
                       _showShareOptions();
@@ -320,7 +324,6 @@ class _PostCardState extends ConsumerState<PostCard> {
                     left: 12.0, right: 12.0, bottom: 12.0),
                 child: GestureDetector(
                   onTap: () {
-                    // 수정된 부분: 루트 네비게이터 사용 제거
                     Navigator.of(context).push(
                       CupertinoPageRoute(
                         builder: (context) => PostDetailScreen(
@@ -345,6 +348,58 @@ class _PostCardState extends ConsumerState<PostCard> {
         ),
       ),
     );
+  }
+
+  // 해시태그 눌렀을 때 해시태그 채널로 이동
+  void _handleHashtagTap(String hashtag) async {
+    // # 기호 제거
+    final tagName = hashtag.startsWith('#') ? hashtag.substring(1) : hashtag;
+    
+    try {
+      // 해시태그 채널 검색
+      final channelRepository = ref.read(hashtagChannelRepositoryProvider);
+      final channels = await channelRepository.searchChannels(tagName);
+      
+      if (!mounted) return;
+      
+      // 동일한 이름의 채널이 있으면 바로 이동
+      final matchedChannel = channels.where(
+        (channel) => channel.name.toLowerCase() == tagName.toLowerCase()
+      ).toList();
+      
+      if (!mounted) return;
+      
+      if (matchedChannel.isNotEmpty) {
+        // 일치하는 채널이 있으면 바로 상세 페이지로 이동
+        Navigator.push(
+          context,
+          CupertinoPageRoute(
+            builder: (context) => HashtagChannelDetailScreen(
+              channelId: matchedChannel.first.id,
+              channelName: matchedChannel.first.name,
+            ),
+          ),
+        );
+      } else {
+        // 일치하는 채널이 없으면 검색 화면으로 이동
+        Navigator.push(
+          context,
+          CupertinoPageRoute(
+            builder: (context) => const HashtagExploreScreen(),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      
+      // 오류 발생 시 검색 화면으로 이동
+      Navigator.push(
+        context,
+        CupertinoPageRoute(
+          builder: (context) => const HashtagExploreScreen(),
+        ),
+      );
+    }
   }
 
   // 게시 시간 포맷팅
@@ -473,7 +528,7 @@ class _PostCardState extends ConsumerState<PostCard> {
 
     // 공유 문구 생성
     final shareContent =
-        '[$username]\n$caption\n\n$hashtags\n\n해시태라(Hashtara)에서 공유됨';
+        '[$username]\n$caption\n\n$hashtags\n\n해시타라(Hashtara)에서 공유됨';
     const shareSubject = 'Hashtara 게시물';
 
     try {
@@ -586,7 +641,7 @@ class _PostCardState extends ConsumerState<PostCard> {
               },
               child: const Text('수정하기'),
             ),
-            // 수정된 부분: 조건문으로 나누어 각각 다른 CupertinoActionSheetAction을 렌더링
+            // 조건문으로 나누어 각각 다른 CupertinoActionSheetAction을 렌더링
             if (_isDeleting)
               CupertinoActionSheetAction(
                 // 비어있는 함수를 전달 (null 대신)
@@ -802,7 +857,7 @@ class _PostCardState extends ConsumerState<PostCard> {
     );
   }
 
-  // 게시물 신고 처리 - 수정된 메서드
+  // 게시물 신고 처리
   Future<void> _reportPost(String reason) async {
     final currentUser = ref.read(currentUserProvider).valueOrNull;
     if (currentUser == null) {

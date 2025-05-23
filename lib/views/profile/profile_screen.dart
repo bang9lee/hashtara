@@ -6,9 +6,11 @@ import '../../../providers/profile_provider.dart';
 import '../../../providers/feed_provider.dart';
 import '../../../providers/chat_provider.dart';
 import '../../../providers/hashtag_channel_provider.dart';
+import '../../../models/chat_model.dart';
 import '../widgets/post_card.dart';
 import '../widgets/user_avatar.dart';
 import 'edit_profile_screen.dart';
+import 'settings_screen.dart';
 import '../auth/login_screen.dart';
 import '../feed/chat_detail_screen.dart';
 import '../feed/hashtag_channel_detail_screen.dart';
@@ -68,6 +70,74 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         debugPrint('팔로우 상태 확인 오류: $e');
       }
     }
+  }
+  
+  // 프로필 메뉴 표시
+  void _showProfileMenu() {
+    showCupertinoModalPopup(
+      context: context,
+      builder: (context) => CupertinoActionSheet(
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(context);
+              _navigateToEditProfile();
+            },
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(CupertinoIcons.pencil, size: 20),
+                SizedBox(width: 8),
+                Text('프로필 편집'),
+              ],
+            ),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(context);
+              _navigateToSettings();
+            },
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(CupertinoIcons.gear, size: 20),
+                SizedBox(width: 8),
+                Text('설정'),
+              ],
+            ),
+          ),
+          CupertinoActionSheetAction(
+            isDestructiveAction: true,
+            onPressed: () {
+              Navigator.pop(context);
+              _handleLogout();
+            },
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(CupertinoIcons.square_arrow_right, size: 20),
+                SizedBox(width: 8),
+                Text('로그아웃'),
+              ],
+            ),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('취소'),
+        ),
+      ),
+    );
+  }
+  
+  // 설정 화면으로 이동
+  void _navigateToSettings() {
+    Navigator.push(
+      context,
+      CupertinoPageRoute(
+        builder: (context) => const SettingsScreen(),
+      ),
+    );
   }
 
   // 🔥🔥🔥 강화된 로그아웃 처리 함수 - 즉시 Firebase 로그아웃 + 프로바이더 정리
@@ -242,7 +312,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
   
-  // 메시지 보내기 처리 함수
+  // 메시지 보내기 처리 함수 (수정된 버전)
   void _handleSendMessage() async {
     final currentUser = ref.read(currentUserProvider).valueOrNull;
     if (currentUser == null) {
@@ -261,8 +331,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     });
 
     try {
-      // 채팅방 생성 또는 이미 있는 채팅방 가져오기
-      final chatId = await ref.read(chatControllerProvider.notifier)
+      // 채팅 요청 보내기 (기존 채팅방이 있으면 그 채팅방으로 이동)
+      final result = await ref.read(chatControllerProvider.notifier)
           .createOrGetChatRoom(currentUser.id, widget.userId);
       
       // mounted 체크를 추가하여 async gap 문제 해결
@@ -272,25 +342,57 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         _isMessageLoading = false;
       });
       
-      if (chatId == null) return;
-
-      // 상대방 정보 가져오기
-      final otherUser = await ref.read(getUserProfileProvider(widget.userId).future);
+      if (result == null) {
+        _showErrorDialog('오류', '채팅방을 생성하는 중 오류가 발생했습니다.');
+        return;
+      }
       
-      // 여기서도 mounted 체크 필요 (async gap 이후)
+      // 채팅방 상태 확인
+      final chat = await ref.read(chatDetailProvider(result).future);
+      
       if (!mounted) return;
       
-      // 채팅 상세 화면으로 이동
-      Navigator.push(
-        context,
-        CupertinoPageRoute(
-          builder: (context) => ChatDetailScreen(
-            chatId: chatId,
-            chatName: otherUser?.name ?? otherUser?.username ?? '대화',
-            imageUrl: otherUser?.profileImageUrl,
+      if (chat == null) {
+        _showErrorDialog('오류', '채팅방 정보를 불러올 수 없습니다.');
+        return;
+      }
+      
+      // 채팅방 상태에 따라 다른 처리
+      if (chat.status == ChatStatus.active) {
+        // 활성 채팅방이면 채팅 화면으로 이동
+        final otherUser = await ref.read(getUserProfileProvider(widget.userId).future);
+        
+        if (!mounted) return;
+        
+        Navigator.push(
+          context,
+          CupertinoPageRoute(
+            builder: (context) => ChatDetailScreen(
+              chatId: result,
+              chatName: otherUser?.name ?? otherUser?.username ?? '대화',
+              imageUrl: otherUser?.profileImageUrl,
+            ),
           ),
-        ),
-      );
+        );
+      } else if (chat.status == ChatStatus.pending) {
+        // 대기 중인 요청이 있으면 알림
+        _showInfoDialog(
+          '채팅 요청 대기 중',
+          '이미 채팅 요청을 보냈습니다. 상대방의 응답을 기다려주세요.'
+        );
+      } else if (chat.status == ChatStatus.rejected) {
+        // 거절된 요청이 있으면 알림
+        _showInfoDialog(
+          '채팅 요청 거절됨',
+          '상대방이 채팅 요청을 거절했습니다.'
+        );
+      } else {
+        // 새로운 채팅 요청이 전송됨
+        _showSuccessDialog(
+          '채팅 요청 전송',
+          '채팅 요청을 보냈습니다. 상대방이 수락하면 대화를 시작할 수 있습니다.'
+        );
+      }
     } catch (e) {
       // mounted 체크를 추가하여 async gap 문제 해결
       if (!mounted) return;
@@ -298,7 +400,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       setState(() {
         _isMessageLoading = false;
       });
-      _showErrorDialog('메시지 오류', '채팅방을 생성하는 중 오류가 발생했습니다: $e');
+      
+      // 에러 메시지 처리
+      String errorMessage = e.toString();
+      if (errorMessage.contains('이미 채팅 요청을 보냈습니다')) {
+        _showInfoDialog('채팅 요청 대기 중', errorMessage);
+      } else if (errorMessage.contains('상대방이 채팅 요청을 거절했습니다')) {
+        _showInfoDialog('채팅 요청 거절됨', errorMessage);
+      } else {
+        _showErrorDialog('메시지 오류', '채팅 요청을 보내는 중 오류가 발생했습니다: $e');
+      }
     }
   }
   
@@ -333,6 +444,40 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   
   // 오류 다이얼로그
   void _showErrorDialog(String title, String message) {
+    showCupertinoDialog(
+      context: context,
+      builder: (dialogContext) => CupertinoAlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('확인'),
+            onPressed: () => Navigator.of(dialogContext).pop(),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  // 정보 다이얼로그 (새로 추가)
+  void _showInfoDialog(String title, String message) {
+    showCupertinoDialog(
+      context: context,
+      builder: (dialogContext) => CupertinoAlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('확인'),
+            onPressed: () => Navigator.of(dialogContext).pop(),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  // 성공 다이얼로그 (새로 추가)
+  void _showSuccessDialog(String title, String message) {
     showCupertinoDialog(
       context: context,
       builder: (dialogContext) => CupertinoAlertDialog(
@@ -385,39 +530,23 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
   
-  // 해시태그 눌렀을 때 해시태그 채널로 이동
+  // 해시태그 눌렀을 때 해시태그 채널로 이동 (로딩 표시 제거)
   void _handleHashtagTap(String hashtag) async {
     // # 기호 제거
     final tagName = hashtag.startsWith('#') ? hashtag.substring(1) : hashtag;
     
     try {
-      // 로딩 표시 
-      showCupertinoDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CupertinoActivityIndicator(
-            color: AppColors.primaryPurple,
-            radius: 20,
-          ),
-        ),
-      );
-      
       // 해시태그 채널 검색
       final channelRepository = ref.read(hashtagChannelRepositoryProvider);
       final channels = await channelRepository.searchChannels(tagName);
       
       if (!mounted) return;
       
-      // 로딩 다이얼로그 닫기
-      Navigator.pop(context);
-      
       // 동일한 이름의 채널이 있으면 바로 이동
       final matchedChannel = channels.where(
         (channel) => channel.name.toLowerCase() == tagName.toLowerCase()
       ).toList();
       
-      // mounted 체크를 추가 (중복 체크이지만 명시적으로 다시 확인)
       if (!mounted) return;
       
       if (matchedChannel.isNotEmpty) {
@@ -442,9 +571,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      
-      // 오류 발생 시 로딩 다이얼로그 닫기
-      Navigator.of(context, rootNavigator: true).pop();
       
       // 오류 발생 시 검색 화면으로 이동
       Navigator.push(
@@ -528,22 +654,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           error: (_, __) => const Text('프로필'),
         ),
         trailing: isCurrentUser
-            ? Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CupertinoButton(
-                    padding: EdgeInsets.zero,
-                    onPressed: _isLoggingOut ? null : _handleLogout,
-                    child: _isLoggingOut 
-                      ? const CupertinoActivityIndicator()
-                      : const Icon(CupertinoIcons.square_arrow_right),
-                  ),
-                  CupertinoButton(
-                    padding: EdgeInsets.zero,
-                    onPressed: _isLoggingOut ? null : _navigateToEditProfile,
-                    child: const Icon(CupertinoIcons.settings),
-                  ),
-                ],
+            ? CupertinoButton(
+                padding: EdgeInsets.zero,
+                onPressed: _isLoggingOut ? null : _showProfileMenu,
+                child: const Icon(
+                  CupertinoIcons.ellipsis_vertical,
+                  color: AppColors.white,
+                ),
               )
             : null,
       ),

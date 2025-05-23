@@ -10,11 +10,18 @@ final chatRepositoryProvider = Provider<ChatRepository>((ref) {
   return ChatRepository();
 });
 
-// 채팅방 목록 프로바이더
+// 사용자의 채팅방 목록 프로바이더 (활성 채팅방만)
 final userChatsProvider = StreamProvider.family<List<ChatModel>, String>((ref, userId) {
   debugPrint('userChatsProvider 초기화됨: $userId');
   final repository = ref.watch(chatRepositoryProvider);
   return repository.getUserChats(userId);
+});
+
+// 사용자의 대기 중인 채팅 요청 목록 프로바이더
+final pendingChatRequestsProvider = StreamProvider.family<List<ChatModel>, String>((ref, userId) {
+  debugPrint('pendingChatRequestsProvider 초기화됨: $userId');
+  final repository = ref.watch(chatRepositoryProvider);
+  return repository.getPendingChatRequests(userId);
 });
 
 // 특정 채팅방 메시지 프로바이더
@@ -42,6 +49,13 @@ final unreadMessagesCountProvider = StreamProvider.family<int, String>((ref, use
   debugPrint('unreadMessagesCountProvider 초기화됨: $userId');
   final repository = ref.watch(chatRepositoryProvider);
   return repository.getUnreadMessagesCount(userId);
+});
+
+// 읽지 않은 채팅 요청 카운트 프로바이더
+final unreadChatRequestsCountProvider = StreamProvider.family<int, String>((ref, userId) {
+  debugPrint('unreadChatRequestsCountProvider 초기화됨: $userId');
+  final repository = ref.watch(chatRepositoryProvider);
+  return repository.getUnreadChatRequestsCount(userId);
 });
 
 // 채팅 컨트롤러 클래스
@@ -81,7 +95,7 @@ class ChatController extends StateNotifier<AsyncValue<void>> {
     }
   }
   
-  // 채팅방 생성
+  // 채팅방 생성 (기존 메서드 - 그룹 채팅용)
   Future<String?> createChat({
     required List<String> participantIds,
     bool isGroup = false,
@@ -113,6 +127,76 @@ class ChatController extends StateNotifier<AsyncValue<void>> {
     }
   }
   
+  // 채팅 요청 보내기
+  Future<String?> sendChatRequest({
+    required String requesterId,
+    required String receiverId,
+  }) async {
+    state = const AsyncValue.loading();
+    
+    try {
+      final chatId = await _repository.sendChatRequest(
+        requesterId: requesterId,
+        receiverId: receiverId,
+      );
+      
+      // 요청자와 수신자의 채팅 요청 목록 새로고침
+      // ignore: unused_result
+      _ref.refresh(pendingChatRequestsProvider(receiverId));
+      
+      state = const AsyncValue.data(null);
+      return chatId;
+    } catch (e, stack) {
+      debugPrint('채팅 요청 전송 실패: $e');
+      state = AsyncValue.error(e, stack);
+      return null;
+    }
+  }
+  
+  // 채팅 요청 수락
+  Future<void> acceptChatRequest({
+    required String chatId,
+    required String userId,
+  }) async {
+    state = const AsyncValue.loading();
+    
+    try {
+      await _repository.acceptChatRequest(chatId: chatId, userId: userId);
+      
+      // 채팅방 목록과 요청 목록 새로고침
+      // ignore: unused_result
+      _ref.refresh(userChatsProvider(userId));
+      // ignore: unused_result
+      _ref.refresh(pendingChatRequestsProvider(userId));
+      
+      state = const AsyncValue.data(null);
+    } catch (e, stack) {
+      debugPrint('채팅 요청 수락 실패: $e');
+      state = AsyncValue.error(e, stack);
+    }
+  }
+  
+  // 채팅 요청 거절
+  Future<void> rejectChatRequest({
+    required String chatId,
+    required String userId,
+  }) async {
+    state = const AsyncValue.loading();
+    
+    try {
+      await _repository.rejectChatRequest(chatId: chatId, userId: userId);
+      
+      // 요청 목록 새로고침
+      // ignore: unused_result
+      _ref.refresh(pendingChatRequestsProvider(userId));
+      
+      state = const AsyncValue.data(null);
+    } catch (e, stack) {
+      debugPrint('채팅 요청 거절 실패: $e');
+      state = AsyncValue.error(e, stack);
+    }
+  }
+  
   // 메시지 읽음 표시
   Future<void> markMessagesAsRead({
     required String chatId,
@@ -133,7 +217,7 @@ class ChatController extends StateNotifier<AsyncValue<void>> {
     }
   }
   
-  // 1:1 채팅방 ID 가져오기 (없으면 생성)
+  // 1:1 채팅방 ID 가져오기 (없으면 생성) - 이제는 채팅 요청을 보냄
   Future<String?> getOrCreateDirectChat({
     required String currentUserId,
     required String otherUserId,
@@ -141,9 +225,35 @@ class ChatController extends StateNotifier<AsyncValue<void>> {
     state = const AsyncValue.loading();
     
     try {
-      final chatId = await _repository.getOrCreateDirectChat(
-        currentUserId: currentUserId,
-        otherUserId: otherUserId,
+      // 먼저 기존 채팅방이 있는지 확인
+      final existingChatId = await _repository.findExistingDirectChat(
+        currentUserId,
+        otherUserId,
+      );
+      
+      if (existingChatId != null) {
+        // 기존 채팅방이 있으면 상태 확인
+        final chat = await _repository.getChatByIdOnce(existingChatId);
+        
+        if (chat != null) {
+          if (chat.status == ChatStatus.active) {
+            // 활성 채팅방이면 바로 반환
+            state = const AsyncValue.data(null);
+            return existingChatId;
+          } else if (chat.status == ChatStatus.pending) {
+            // 대기 중인 요청이 있으면 알림
+            throw Exception('이미 채팅 요청을 보냈습니다. 상대방의 응답을 기다려주세요.');
+          } else if (chat.status == ChatStatus.rejected) {
+            // 거절된 요청이 있으면 알림
+            throw Exception('상대방이 채팅 요청을 거절했습니다.');
+          }
+        }
+      }
+      
+      // 새로운 채팅 요청 보내기
+      final chatId = await sendChatRequest(
+        requesterId: currentUserId,
+        receiverId: otherUserId,
       );
       
       state = const AsyncValue.data(null);
@@ -155,7 +265,7 @@ class ChatController extends StateNotifier<AsyncValue<void>> {
     }
   }
   
-  // 채팅방 나가기
+  // 채팅방 나가기 (개선된 버전)
   Future<void> leaveChat({
     required String chatId,
     required String userId,
@@ -163,7 +273,7 @@ class ChatController extends StateNotifier<AsyncValue<void>> {
     state = const AsyncValue.loading();
     
     try {
-      await _repository.leaveChat(chatId: chatId, userId: userId);
+      await _repository.leaveChatImproved(chatId: chatId, userId: userId);
       
       // 사용자의 채팅방 목록 새로고침
       final refreshChats = _ref.refresh(userChatsProvider(userId));

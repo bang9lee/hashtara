@@ -1,63 +1,120 @@
 import 'package:flutter/cupertino.dart';
+// 🔥 추가: 실제 화면 클래스들 import
+import '../feed/post_detail_screen.dart';
+import '../profile/profile_screen.dart';
+import '../feed/chat_detail_screen.dart';
+
+// 🔥 추가: 글로벌 네비게이터 키 import
+import '../../../main.dart' as main_file;
 
 // 알림 관련 헬퍼 함수들
 class NotificationHelpers {
-  // 알림 타입에 따라 해당 화면으로 네비게이션
+  // 🔥 수정: 알림 타입에 따라 해당 화면으로 네비게이션 - 글로벌 네비게이터 사용
   static void navigateToScreenByType(BuildContext context, String? type, String targetId) {
     if (type == null || targetId.isEmpty) {
       debugPrint('알림 타입 또는 targetId가 없습니다.');
       return;
     }
     
-    switch (type) {
-      case 'comment':
-      case 'reply':
-      case 'like':
-        // 게시물 상세 화면으로 이동
-        _navigateToPost(context, targetId);
-        break;
-        
-      case 'follow':
-        // 프로필 화면으로 이동
-        _navigateToProfile(context, targetId);
-        break;
-        
-      case 'message':
-        // 채팅 화면으로 이동
-        _navigateToChat(context, targetId);
-        break;
-        
-      default:
-        debugPrint('알 수 없는 알림 타입: $type');
-        break;
+    try {
+      switch (type) {
+        case 'comment':
+        case 'reply':
+        case 'like':
+          // 게시물 상세 화면으로 이동
+          _navigateToPost(context, targetId);
+          break;
+          
+        case 'follow':
+          // 프로필 화면으로 이동
+          _navigateToProfile(context, targetId);
+          break;
+          
+        case 'message':
+          // 채팅 화면으로 이동
+          _navigateToChat(context, targetId);
+          break;
+          
+        default:
+          debugPrint('알 수 없는 알림 타입: $type');
+          _showErrorDialog(context, '지원하지 않는 알림 타입입니다.');
+          break;
+      }
+    } catch (e) {
+      debugPrint('네비게이션 처리 중 오류: $e');
+      _showErrorDialog(context, '페이지를 불러올 수 없습니다.');
     }
   }
   
-  // 게시물 상세 화면으로 이동
+  // 🔥 수정: 게시물 상세 화면으로 이동 - 글로벌 네비게이터 사용
   static void _navigateToPost(BuildContext context, String postId) {
     try {
-      Navigator.of(context).pushNamed('/post/$postId');
+      debugPrint('게시물 화면으로 이동: $postId');
+      
+      // 🔥 글로벌 네비게이터 키 사용
+      if (main_file.navigatorKey.currentState != null) {
+        main_file.navigatorKey.currentState!.pushNamed('/post/$postId');
+        debugPrint('글로벌 네비게이터로 게시물 화면 이동 성공');
+      } else {
+        // 🔥 대체 방법: 직접 네비게이션
+        Navigator.of(context, rootNavigator: true).push(
+          CupertinoPageRoute(
+            builder: (context) => PostDetailScreen(postId: postId),
+          ),
+        );
+        debugPrint('직접 네비게이션으로 게시물 화면 이동');
+      }
     } catch (e) {
       debugPrint('게시물 화면 이동 실패: $e');
-      // 대체 방법으로 라우트 이름 사용
       _showErrorDialog(context, '게시물을 불러올 수 없습니다.');
     }
   }
   
-  // 프로필 화면으로 이동
+  // 🔥 수정: 프로필 화면으로 이동 - 글로벌 네비게이터 사용
   static void _navigateToProfile(BuildContext context, String userId) {
     try {
-      Navigator.of(context).pushNamed('/profile/$userId');
+      debugPrint('프로필 화면으로 이동: $userId');
+      
+      // 🔥 글로벌 네비게이터 키 사용
+      if (main_file.navigatorKey.currentState != null) {
+        main_file.navigatorKey.currentState!.pushNamed('/profile/$userId');
+        debugPrint('글로벌 네비게이터로 프로필 화면 이동 성공');
+      } else {
+        // 🔥 대체 방법: 직접 네비게이션
+        Navigator.of(context, rootNavigator: true).push(
+          CupertinoPageRoute(
+            builder: (context) => ProfileScreen(userId: userId),
+          ),
+        );
+        debugPrint('직접 네비게이션으로 프로필 화면 이동');
+      }
     } catch (e) {
       debugPrint('프로필 화면 이동 실패: $e');
       _showErrorDialog(context, '프로필을 불러올 수 없습니다.');
     }
   }
   
-  // 채팅 화면으로 이동
+  // 🔥 수정: 채팅 화면으로 이동 - 글로벌 네비게이터 사용
   static void _navigateToChat(BuildContext context, String chatId) {
     try {
-      Navigator.of(context).pushNamed('/chat/$chatId');
+      debugPrint('채팅 화면으로 이동: $chatId');
+      
+      // 🔥 글로벌 네비게이터 키 사용
+      if (main_file.navigatorKey.currentState != null) {
+        main_file.navigatorKey.currentState!.pushNamed('/chat/$chatId');
+        debugPrint('글로벌 네비게이터로 채팅 화면 이동 성공');
+      } else {
+        // 🔥 대체 방법: 직접 네비게이션
+        Navigator.of(context, rootNavigator: true).push(
+          CupertinoPageRoute(
+            builder: (context) => ChatDetailScreen(
+              chatId: chatId,
+              chatName: '채팅',
+            ),
+          ),
+        );
+        debugPrint('직접 네비게이션으로 채팅 화면 이동');
+      }
     } catch (e) {
       debugPrint('채팅 화면 이동 실패: $e');
       _showErrorDialog(context, '채팅을 불러올 수 없습니다.');
