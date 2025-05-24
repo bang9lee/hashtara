@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:flutter/foundation.dart';
+import '../firebase_options.dart'; // 👈 이 줄 추가
 
 class FirebaseService {
   // Firebase 인스턴스 가져오기
@@ -20,8 +21,10 @@ class FirebaseService {
   // Firebase 초기화 - App Check 포함
   static Future<void> initializeFirebase() async {
     try {
-      // Firebase 기본 초기화
-      await Firebase.initializeApp();
+      // Firebase 기본 초기화 - 이 줄만 수정! 👇
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
       
       // App Check 초기화
       await _initializeAppCheck();

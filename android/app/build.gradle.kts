@@ -48,7 +48,7 @@ android {
         applicationId = "com.hashtara.app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = 21  // 구글 로그인을 위해 최소 SDK 버전 21로 설정
+        minSdk = 23  // 구글 로그인을 위해 최소 SDK 버전 21로 설정
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode.toInt()
         versionName = flutter.versionName

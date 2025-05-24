@@ -8,12 +8,6 @@ import '../../../providers/profile_provider.dart';
 import '../../../models/chat_model.dart';
 import 'chat_detail_screen.dart';
 
-// 채팅 요청 프로바이더
-final pendingChatRequestsProvider = StreamProvider.family<List<ChatModel>, String>((ref, userId) {
-  final repository = ref.watch(chatRepositoryProvider);
-  return repository.getPendingChatRequests(userId);
-});
-
 class ChatRequestScreen extends ConsumerStatefulWidget {
   const ChatRequestScreen({Key? key}) : super(key: key);
 
@@ -25,14 +19,44 @@ class _ChatRequestScreenState extends ConsumerState<ChatRequestScreen> {
   // 채팅 요청 수락
   Future<void> _acceptChatRequest(ChatModel chat) async {
     try {
-      // 로딩 다이얼로그 표시
-      _showLoadingDialog('채팅 요청을 수락하는 중...');
-      
       final currentUser = ref.read(currentUserProvider).valueOrNull;
       if (currentUser == null) {
-        if (mounted) Navigator.pop(context);
         return;
       }
+      
+      // 채팅방 이름과 이미지 미리 가져오기
+      final chatName = await _getChatName(chat, currentUser.id);
+      final imageUrl = await _getChatImageUrl(chat, currentUser.id);
+      
+      // 로딩 다이얼로그 표시
+      if (!mounted) return;
+      showCupertinoDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => PopScope(
+          canPop: false,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppColors.cardBackground,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CupertinoActivityIndicator(),
+                  SizedBox(height: 10),
+                  Text(
+                    '채팅 요청을 수락하는 중...',
+                    style: TextStyle(color: AppColors.textEmphasis),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
       
       // 채팅 요청 수락
       await ref.read(chatControllerProvider.notifier).acceptChatRequest(
@@ -40,15 +64,13 @@ class _ChatRequestScreenState extends ConsumerState<ChatRequestScreen> {
         userId: currentUser.id,
       );
       
-      // 로딩 다이얼로그 닫기
-      if (mounted) Navigator.pop(context);
-      
-      // 채팅방 정보 가져오기 전에 약간의 지연 추가 (상태 업데이트 대기)
+      // 상태 업데이트를 위한 짧은 대기
       await Future.delayed(const Duration(milliseconds: 500));
       
-      // 채팅방 이름과 이미지 가져오기
-      final chatName = await _getChatName(chat, currentUser.id);
-      final imageUrl = await _getChatImageUrl(chat, currentUser.id);
+      // 로딩 다이얼로그 닫기
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
       
       // 채팅 화면으로 이동
       if (mounted) {
@@ -64,7 +86,10 @@ class _ChatRequestScreenState extends ConsumerState<ChatRequestScreen> {
         );
       }
     } catch (e) {
-      if (mounted) Navigator.pop(context);
+      // 에러 발생 시 로딩 다이얼로그 닫기
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
       _showErrorDialog('오류', '채팅 요청 수락 중 오류가 발생했습니다: $e');
     }
   }
@@ -119,15 +144,26 @@ class _ChatRequestScreenState extends ConsumerState<ChatRequestScreen> {
       return chat.groupName ?? '그룹 채팅';
     }
     
-    final otherUserId = chat.participantIds.firstWhere(
+    // 요청자 ID 사용 (받은 사람 입장에서는 요청자가 상대방)
+    final otherUserId = chat.requesterId ?? chat.participantIds.firstWhere(
       (id) => id != currentUserId,
       orElse: () => '',
     );
     
     if (otherUserId.isEmpty) return '알 수 없는 사용자';
     
-    final otherUser = await ref.read(getUserProfileProvider(otherUserId).future);
-    return otherUser?.name ?? otherUser?.username ?? '알 수 없는 사용자';
+    try {
+      final otherUser = await ref.read(getUserProfileProvider(otherUserId).future);
+      if (otherUser?.name != null && otherUser!.name!.trim().isNotEmpty) {
+        return otherUser.name!;
+      } else if (otherUser?.username != null && otherUser!.username!.trim().isNotEmpty) {
+        return '@${otherUser.username!}';
+      }
+    } catch (e) {
+      debugPrint('사용자 정보 가져오기 오류: $e');
+    }
+    
+    return '알 수 없는 사용자';
   }
   
   // 채팅방 이미지 가져오기
@@ -136,15 +172,21 @@ class _ChatRequestScreenState extends ConsumerState<ChatRequestScreen> {
       return chat.groupImageUrl;
     }
     
-    final otherUserId = chat.participantIds.firstWhere(
+    // 요청자 ID 사용
+    final otherUserId = chat.requesterId ?? chat.participantIds.firstWhere(
       (id) => id != currentUserId,
       orElse: () => '',
     );
     
     if (otherUserId.isEmpty) return null;
     
-    final otherUser = await ref.read(getUserProfileProvider(otherUserId).future);
-    return otherUser?.profileImageUrl;
+    try {
+      final otherUser = await ref.read(getUserProfileProvider(otherUserId).future);
+      return otherUser?.profileImageUrl;
+    } catch (e) {
+      debugPrint('사용자 이미지 가져오기 오류: $e');
+      return null;
+    }
   }
   
   // 로딩 다이얼로그
@@ -307,6 +349,11 @@ class _ChatRequestScreenState extends ConsumerState<ChatRequestScreen> {
       data: (requester) {
         if (requester == null) return const SizedBox.shrink();
         
+        // 표시할 이름 결정
+        final displayName = requester.name != null && requester.name!.trim().isNotEmpty
+            ? requester.name!
+            : '@${requester.username ?? 'unknown'}';
+        
         return Container(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           padding: const EdgeInsets.all(16),
@@ -360,21 +407,23 @@ class _ChatRequestScreenState extends ConsumerState<ChatRequestScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          requester.name ?? requester.username ?? '알 수 없는 사용자',
+                          displayName,
                           style: const TextStyle(
                             color: AppColors.white,
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '@${requester.username ?? 'unknown'}',
-                          style: const TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 14,
+                        if (requester.username != null) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            '@${requester.username}',
+                            style: const TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 14,
+                            ),
                           ),
-                        ),
+                        ],
                         const SizedBox(height: 4),
                         Text(
                           _formatTimeAgo(request.createdAt),

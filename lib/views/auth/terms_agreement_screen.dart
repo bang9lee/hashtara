@@ -1,7 +1,6 @@
-// terms_agreement_screen.dart - 약관 동의 화면
-
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; // 🔥 kIsWeb 추가
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../constants/app_colors.dart';
 import '../../../providers/auth_provider.dart';
@@ -19,7 +18,7 @@ class TermsAgreementState {
   final String? errorMessage;
   final bool termsAgreed;
   final bool privacyAgreed;
-  final bool marketingAgreed; // 선택 항목
+  final bool marketingAgreed;
 
   TermsAgreementState({
     this.isLoading = false,
@@ -122,6 +121,50 @@ class _TermsAgreementScreenState extends ConsumerState<TermsAgreementScreen> {
     super.dispose();
   }
 
+  // 🔥 웹 안전한 네비게이션 함수
+  Future<void> _safeNavigateToProfile() async {
+    if (!mounted) return;
+    
+    ref.read(termsAgreementStateProvider.notifier).startNavigation();
+    
+    try {
+      if (kIsWeb) {
+        // 🌐 웹에서는 더 안전한 방식으로 네비게이션
+        debugPrint('🌐 웹: 프로필 설정 화면으로 안전한 네비게이션');
+        
+        await Future.delayed(const Duration(milliseconds: 100));
+        
+        if (mounted && context.mounted) {
+          Navigator.of(context).pushReplacement(
+            CupertinoPageRoute(
+              builder: (context) => SetupProfileScreen(
+                userId: widget.userId,
+              ),
+            ),
+          );
+        }
+      } else {
+        // 📱 모바일에서는 기존 방식
+        if (mounted) {
+          Navigator.of(context).pushReplacement(
+            CupertinoPageRoute(
+              builder: (context) => SetupProfileScreen(
+                userId: widget.userId,
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('네비게이션 오류: $e');
+      if (mounted) {
+        ref.read(termsAgreementStateProvider.notifier).setError(
+          '화면 이동 중 오류가 발생했습니다. 다시 시도해주세요.'
+        );
+      }
+    }
+  }
+
   // 약관 동의 저장 및 다음 화면으로 이동
   Future<void> _saveAgreementsAndNavigate() async {
     final state = ref.read(termsAgreementStateProvider);
@@ -134,27 +177,36 @@ class _TermsAgreementScreenState extends ConsumerState<TermsAgreementScreen> {
     ref.read(termsAgreementStateProvider.notifier).startProcessing();
 
     try {
+      debugPrint('🔥 약관 동의 처리 시작: ${widget.userId}');
+      
       // Firebase에 약관 동의 정보 저장 - AuthController를 통해 처리
       await ref.read(authControllerProvider.notifier).completeTermsAgreement(widget.userId);
       
       ref.read(termsAgreementStateProvider.notifier).completeProcessing();
       
-      // 다음 화면(프로필 설정)으로 이동
-      if (mounted) {
-        ref.read(termsAgreementStateProvider.notifier).startNavigation();
-        
-        Navigator.of(context).pushReplacement(
-          CupertinoPageRoute(
-            builder: (context) => SetupProfileScreen(
-              userId: widget.userId,
-            ),
-          ),
-        );
-      }
+      debugPrint('✅ 약관 동의 저장 완료, 프로필 설정 화면으로 이동');
+      
+      // 🔥 웹 안전한 네비게이션 사용
+      await _safeNavigateToProfile();
+      
     } catch (e) {
       debugPrint('약관 동의 저장 실패: $e');
-      ref.read(termsAgreementStateProvider.notifier).setError('약관 동의 정보를 저장하는 중 오류가 발생했습니다. 다시 시도해주세요.');
-      rethrow;
+      
+      // 🌐 웹에서 더 사용자 친화적인 오류 메시지
+      String errorMessage;
+      if (kIsWeb) {
+        if (e.toString().contains('permission') || e.toString().contains('denied')) {
+          errorMessage = '권한이 없습니다. 다시 로그인해주세요.';
+        } else if (e.toString().contains('network') || e.toString().contains('connection')) {
+          errorMessage = '네트워크 연결을 확인하고 다시 시도해주세요.';
+        } else {
+          errorMessage = '약관 동의 처리 중 오류가 발생했습니다. 다시 시도해주세요.';
+        }
+      } else {
+        errorMessage = '약관 동의 정보를 저장하는 중 오류가 발생했습니다. 다시 시도해주세요.';
+      }
+      
+      ref.read(termsAgreementStateProvider.notifier).setError(errorMessage);
     }
   }
 
@@ -194,7 +246,6 @@ class _TermsAgreementScreenState extends ConsumerState<TermsAgreementScreen> {
     final state = ref.watch(termsAgreementStateProvider);
     
     if (!_pageInitialized) {
-      // 페이지 로드 시 상태 초기화
       WidgetsBinding.instance.addPostFrameCallback((_) {
         ref.read(termsAgreementStateProvider.notifier).resetState();
         _pageInitialized = true;
@@ -531,7 +582,20 @@ class _TermsAgreementScreenState extends ConsumerState<TermsAgreementScreen> {
                         ? null 
                         : (state.canProceed ? _saveAgreementsAndNavigate : null),
                     child: state.isLoading
-                        ? const CupertinoActivityIndicator(color: AppColors.white)
+                        ? const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              CupertinoActivityIndicator(color: AppColors.white),
+                              SizedBox(width: 8),
+                              Text(
+                                kIsWeb ? '처리 중...' : '저장 중...',
+                                style: TextStyle(
+                                  color: AppColors.white,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          )
                         : const Text(
                           '동의하고 계속하기',
                           style: TextStyle(

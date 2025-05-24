@@ -13,6 +13,7 @@
 migrate_working_dir/
 firebase_service.dart
 my-keystore.jks
+web/index.html
 
 # IntelliJ related
 *.iml

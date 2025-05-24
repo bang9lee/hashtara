@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart'; // kIsWeb 추가
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -102,13 +103,77 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
   return AuthRepository();
 });
 
-// 인증 상태 프로바이더
+// 🔥 웹 호환성을 위한 완전히 개선된 인증 상태 프로바이더
 final authStateProvider = StreamProvider<User?>((ref) {
   debugPrint('🔥 AuthState Provider 초기화');
-  return FirebaseAuth.instance.authStateChanges();
+  
+  if (kIsWeb) {
+    debugPrint('🌐 웹: 안전한 Auth State 스트림 사용');
+    
+    // 웹에서는 더 안전한 스트림 생성
+    return Stream.fromFuture(_initializeWebAuth()).asyncExpand((initialized) {
+      if (initialized) {
+        // Firebase Auth가 준비된 후 정상적인 스트림 사용
+        try {
+          return FirebaseAuth.instance.authStateChanges().handleError((error) {
+            debugPrint('🌐 웹: AuthState 스트림 오류 처리: $error');
+            return null; // 오류 시 null 반환
+          });
+        } catch (e) {
+          debugPrint('🌐 웹: AuthState 스트림 생성 실패: $e');
+          return Stream.value(null);
+        }
+      } else {
+        // Firebase 초기화 실패 시 null 스트림
+        debugPrint('🌐 웹: Firebase 초기화 실패 - null 스트림 반환');
+        return Stream.value(null);
+      }
+    });
+  } else {
+    // 모바일에서는 기존 방식
+    debugPrint('📱 모바일: 기존 AuthState 스트림 사용');
+    return FirebaseAuth.instance.authStateChanges();
+  }
 });
 
-// 🔥 구글 로그인 문제 해결을 위한 강화된 현재 사용자 프로바이더
+// 웹에서 Firebase Auth 초기화 대기
+Future<bool> _initializeWebAuth() async {
+  if (!kIsWeb) return true;
+  
+  try {
+    debugPrint('🌐 웹: Firebase Auth 초기화 대기 시작');
+    
+    // Firebase가 초기화될 때까지 대기 (최대 10초)
+    int attempts = 0;
+    const maxAttempts = 20; // 10초 (500ms * 20)
+    
+    while (attempts < maxAttempts) {
+      try {
+        // Firebase Auth 인스턴스 접근 시도
+        final currentUser = FirebaseAuth.instance.currentUser;
+        debugPrint('🌐 웹: Firebase Auth 접근 성공 (사용자: ${currentUser?.uid})');
+        
+        // 추가 대기로 안정성 확보
+        await Future.delayed(const Duration(milliseconds: 1000));
+        return true;
+        
+      } catch (e) {
+        debugPrint('🌐 웹: Firebase Auth 초기화 대기 중... (${attempts + 1}/$maxAttempts): $e');
+        await Future.delayed(const Duration(milliseconds: 500));
+        attempts++;
+      }
+    }
+    
+    debugPrint('🌐 웹: Firebase Auth 초기화 시간 초과');
+    return false;
+    
+  } catch (e) {
+    debugPrint('🌐 웹: Firebase Auth 초기화 실패: $e');
+    return false;
+  }
+}
+
+// 🔥 웹 호환성 강화된 현재 사용자 프로바이더
 final currentUserProvider = FutureProvider<UserModel?>((ref) async {
   final authState = ref.watch(authStateProvider);
   final repository = ref.watch(authRepositoryProvider);
@@ -122,18 +187,53 @@ final currentUserProvider = FutureProvider<UserModel?>((ref) async {
       
       debugPrint('🔥 로그인된 사용자: ${user.uid}');
       
-      // 🔥 사용자 문서 확인
+      // 🌐 웹에서는 더 안전한 방식으로 문서 확인
       DocumentSnapshot? userDoc;
       try {
-        userDoc = await repository.firestore.collection('users').doc(user.uid).get();
-        debugPrint('🔥 사용자 문서 존재 여부: ${userDoc.exists}');
+        if (kIsWeb) {
+          // 웹에서는 재시도 로직 추가
+          bool docFetched = false;
+          for (int i = 0; i < 3; i++) {
+            try {
+              userDoc = await repository.firestore.collection('users').doc(user.uid).get();
+              docFetched = true;
+              break;
+            } catch (e) {
+              debugPrint('🌐 웹: 사용자 문서 조회 시도 ${i + 1} 실패: $e');
+              if (i == 2) {
+                debugPrint('🌐 웹: 사용자 문서 조회 최종 실패 - 신규 사용자로 처리');
+                ref.read(signupProgressProvider.notifier).state = SignupProgress.registered;
+                await saveSignupProgress(SignupProgress.registered, user.uid);
+                return null;
+              }
+              await Future.delayed(Duration(milliseconds: 500 * (i + 1)));
+            }
+          }
+          
+          if (!docFetched) {
+            debugPrint('🌐 웹: 문서 조회 완전 실패');
+            return null;
+          }
+        } else {
+          userDoc = await repository.firestore.collection('users').doc(user.uid).get();
+        }
+        
+        debugPrint('🔥 사용자 문서 존재 여부: ${userDoc?.exists}');
       } catch (e) {
         debugPrint('🔥 사용자 문서 조회 실패: $e');
+        
+        // 🌐 웹에서 오류가 발생해도 신규 가입자로 처리
+        if (kIsWeb) {
+          debugPrint('🌐 웹: 문서 조회 실패 - 신규 가입자로 처리');
+          ref.read(signupProgressProvider.notifier).state = SignupProgress.registered;
+          await saveSignupProgress(SignupProgress.registered, user.uid);
+          return null;
+        }
         return null;
       }
       
       // 🔥 사용자 문서가 없으면 신규 가입자
-      if (!userDoc.exists) {
+      if (userDoc == null || !userDoc.exists) {
         debugPrint('🔥🔥🔥 사용자 문서 없음 - 신규 가입자 확정');
         ref.read(signupProgressProvider.notifier).state = SignupProgress.registered;
         await saveSignupProgress(SignupProgress.registered, user.uid);
@@ -181,7 +281,18 @@ final currentUserProvider = FutureProvider<UserModel?>((ref) async {
             updateData['profileSetupDate'] = FieldValue.serverTimestamp();
           }
           
-          await repository.firestore.collection('users').doc(user.uid).update(updateData);
+          // 🌐 웹에서는 안전한 업데이트
+          if (kIsWeb) {
+            try {
+              await repository.firestore.collection('users').doc(user.uid).update(updateData);
+            } catch (e) {
+              debugPrint('🌐 웹: 자동 수정 실패 - set으로 재시도: $e');
+              await repository.firestore.collection('users').doc(user.uid).set(updateData, SetOptions(merge: true));
+            }
+          } else {
+            await repository.firestore.collection('users').doc(user.uid).update(updateData);
+          }
+          
           debugPrint('🔥 누락된 필드 자동 수정 완료: ${updateData.keys.join(', ')}');
           
           // 상태 업데이트
@@ -236,7 +347,20 @@ final currentUserProvider = FutureProvider<UserModel?>((ref) async {
       }
     },
     loading: () => null,
-    error: (_, __) => null,
+    error: (error, stack) {
+      debugPrint('🔥 AuthState 에러: $error');
+      // 🌐 웹에서는 특정 오류들을 무시
+      if (kIsWeb) {
+        final errorString = error.toString();
+        if (errorString.contains('JavaScriptObject') || 
+            errorString.contains('FirebaseException') ||
+            errorString.contains('TypeError')) {
+          debugPrint('🌐 웹: 알려진 호환성 오류 무시 - null 반환');
+          return null;
+        }
+      }
+      return null;
+    },
   );
 });
 
@@ -251,7 +375,7 @@ enum SignupProgress {
   completed    // 모든 가입 절차 완료
 }
 
-// 로그인 상태 관리 프로바이더
+// 🔥 웹 호환성 강화된 로그인 상태 관리 프로바이더
 final authControllerProvider = StateNotifierProvider<AuthController, AsyncValue<void>>((ref) {
   final repository = ref.watch(authRepositoryProvider);
   return AuthController(repository, ref);
@@ -274,13 +398,30 @@ class AuthController extends StateNotifier<AsyncValue<void>> {
     }
   }
   
-  // 이메일/비밀번호 로그인
+  // 🔥 웹 호환성 강화된 이메일/비밀번호 로그인
   Future<void> signIn(String email, String password) async {
     state = const AsyncValue.loading();
     
     try {
       debugPrint('🔥 로그인 시도: $email');
-      await _repository.signInWithEmailAndPassword(email, password);
+      
+      if (kIsWeb) {
+        // 🌐 웹에서는 더 안전한 방식으로 로그인
+        debugPrint('🌐 웹: 안전한 로그인 시도');
+        
+        // 웹에서는 signInWithEmailAndPassword 호출 전에 잠시 대기
+        await Future.delayed(const Duration(milliseconds: 500));
+        
+        final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        
+        debugPrint('🌐 웹: 직접 로그인 성공: ${credential.user?.uid}');
+      } else {
+        await _repository.signInWithEmailAndPassword(email, password);
+      }
+      
       await clearDeletedAccountFlag();
       state = const AsyncValue.data(null);
       debugPrint('🔥 로그인 성공');
@@ -290,29 +431,67 @@ class AuthController extends StateNotifier<AsyncValue<void>> {
     }
   }
   
-  // 🔥 구글 로그인 - 완전히 새로 작성
+  // 🔥 웹 호환성 강화된 구글 로그인
   Future<UserCredential?> signInWithGoogle() async {
     state = const AsyncValue.loading();
     
     try {
       debugPrint('🔥 구글 로그인 시도');
-      final result = await _repository.signInWithGoogle();
+      
+      UserCredential result;
+      
+      if (kIsWeb) {
+        // 🌐 웹: 직접 Firebase Auth 사용
+        debugPrint('🌐 웹: 직접 구글 로그인');
+        
+        final googleProvider = GoogleAuthProvider();
+        googleProvider.addScope('email');
+        googleProvider.addScope('profile');
+        
+        result = await FirebaseAuth.instance.signInWithPopup(googleProvider);
+        debugPrint('🌐 웹: 직접 구글 로그인 성공: ${result.user?.uid}');
+      } else {
+        // 📱 모바일: 기존 repository 사용
+        result = await _repository.signInWithGoogle();
+      }
+      
       await clearDeletedAccountFlag();
       
       if (result.user != null) {
         debugPrint('🔥 구글 로그인 성공: ${result.user!.uid}');
         
         // 🔥 사용자 문서 존재 여부 확인
-        final userDoc = await _repository.firestore.collection('users').doc(result.user!.uid).get();
+        DocumentSnapshot? userDoc;
         
-        if (!userDoc.exists) {
+        if (kIsWeb) {
+          // 웹에서는 재시도 로직
+          for (int i = 0; i < 3; i++) {
+            try {
+              userDoc = await _repository.firestore.collection('users').doc(result.user!.uid).get();
+              break;
+            } catch (e) {
+              debugPrint('🌐 웹: 문서 확인 시도 ${i + 1} 실패: $e');
+              if (i == 2) {
+                debugPrint('🌐 웹: 문서 확인 포기 - 신규 가입자로 처리');
+                await updateAndSaveSignupProgress(SignupProgress.registered, result.user!.uid);
+                state = const AsyncValue.data(null);
+                return result;
+              }
+              await Future.delayed(Duration(milliseconds: 500 * (i + 1)));
+            }
+          }
+        } else {
+          userDoc = await _repository.firestore.collection('users').doc(result.user!.uid).get();
+        }
+        
+        if (userDoc == null || !userDoc.exists) {
           debugPrint('🔥🔥🔥 구글 로그인 - 신규 가입자: 약관 동의부터 시작');
           await updateAndSaveSignupProgress(SignupProgress.registered, result.user!.uid);
         } else {
           debugPrint('🔥 구글 로그인 - 기존 사용자: 상태 확인');
           
           // 기존 사용자의 경우 약관/프로필 상태 확인
-          final userData = userDoc.data();
+          final userData = userDoc.data() as Map<String, dynamic>?;
           final termsAgreed = userData?['termsAgreed'] == true;
           final profileComplete = userData?['profileComplete'] == true;
           

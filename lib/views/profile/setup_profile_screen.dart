@@ -1,7 +1,6 @@
-// setup_profile_screen.dart - 수정본
-
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; // 🔥 kIsWeb 추가
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
@@ -93,7 +92,8 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
   bool _nameError = false;
   bool _usernameError = false;
   bool _isSelectingImage = false;
-  bool _isNavigating = false; // 네비게이션 중복 방지 플래그
+  bool _isNavigating = false;
+  bool _disposed = false; // 🔥 dispose 상태 추적
 
   // 최대 글자 수 제한
   final int _maxNameLength = 13;
@@ -104,33 +104,59 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
     super.initState();
     debugPrint('SetupProfileScreen 초기화됨: ${widget.userId}');
     
-    // Android에서 앱이 백그라운드로 이동했다가 돌아왔을 때 데이터 복구
-    if (Platform.isAndroid) {
+    // 🌐 웹에서는 이미지 데이터 복구 건너뛰기
+    if (!kIsWeb && Platform.isAndroid) {
       _retrieveLostData();
     }
   }
   
-  // 이미지 선택 데이터 복구
+  // 이미지 선택 데이터 복구 (모바일만)
   Future<void> _retrieveLostData() async {
-    final LostDataResponse response = await _picker.retrieveLostData();
-    if (response.isEmpty) {
-      return;
-    }
-    if (response.file != null) {
-      setState(() {
-        _profileImage = File(response.file!.path);
-      });
-    } else {
-      debugPrint('이미지 데이터 손실 에러: ${response.exception}');
+    if (kIsWeb) return;
+    
+    try {
+      final LostDataResponse response = await _picker.retrieveLostData();
+      if (response.isEmpty) return;
+      
+      if (response.file != null && mounted && !_disposed) {
+        setState(() {
+          _profileImage = File(response.file!.path);
+        });
+      }
+    } catch (e) {
+      debugPrint('이미지 데이터 손실 에러: $e');
     }
   }
 
   @override
   void dispose() {
+    _disposed = true; // 🔥 dispose 상태 설정
     _nameController.dispose();
     _usernameController.dispose();
     _bioController.dispose();
     super.dispose();
+  }
+
+  // 🔥 안전한 ref 접근 함수
+  T? _safeRef<T>(T Function() refCallback) {
+    if (_disposed || !mounted) {
+      debugPrint('🔥 위젯이 disposed 되어 ref 접근 건너뜀');
+      return null;
+    }
+    
+    try {
+      return refCallback();
+    } catch (e) {
+      debugPrint('🔥 ref 접근 오류: $e');
+      return null;
+    }
+  }
+
+  // 🔥 안전한 상태 업데이트 함수
+  void _safeSetState(VoidCallback callback) {
+    if (mounted && !_disposed) {
+      setState(callback);
+    }
   }
 
   bool _isValidUsername(String username) {
@@ -140,7 +166,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
   
   // 갤러리에서 이미지 선택
   Future<void> _pickImageFromGallery() async {
-    setState(() {
+    _safeSetState(() {
       _isSelectingImage = true;
     });
 
@@ -152,28 +178,27 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
         imageQuality: 90,
       );
 
-      if (pickedFile != null && mounted) {
-        setState(() {
+      if (pickedFile != null && mounted && !_disposed) {
+        _safeSetState(() {
           _profileImage = File(pickedFile.path);
         });
       }
     } catch (e) {
       debugPrint('갤러리 이미지 선택 오류: $e');
-      if (mounted) {
-        ref.read(profileSetupStateProvider.notifier).setError('이미지 선택 중 오류가 발생했습니다: $e');
-      }
+      
+      // 🔥 안전한 오류 처리
+      final profileSetupNotifier = _safeRef(() => ref.read(profileSetupStateProvider.notifier));
+      profileSetupNotifier?.setError('이미지 선택 중 오류가 발생했습니다: $e');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isSelectingImage = false;
-        });
-      }
+      _safeSetState(() {
+        _isSelectingImage = false;
+      });
     }
   }
 
   // 카메라로 이미지 촬영
   Future<void> _pickImageFromCamera() async {
-    setState(() {
+    _safeSetState(() {
       _isSelectingImage = true;
     });
 
@@ -185,28 +210,27 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
         imageQuality: 90,
       );
 
-      if (pickedFile != null && mounted) {
-        setState(() {
+      if (pickedFile != null && mounted && !_disposed) {
+        _safeSetState(() {
           _profileImage = File(pickedFile.path);
         });
       }
     } catch (e) {
       debugPrint('카메라 이미지 촬영 오류: $e');
-      if (mounted) {
-        ref.read(profileSetupStateProvider.notifier).setError('카메라 사용 중 오류가 발생했습니다: $e');
-      }
+      
+      // 🔥 안전한 오류 처리
+      final profileSetupNotifier = _safeRef(() => ref.read(profileSetupStateProvider.notifier));
+      profileSetupNotifier?.setError('카메라 사용 중 오류가 발생했습니다: $e');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isSelectingImage = false;
-        });
-      }
+      _safeSetState(() {
+        _isSelectingImage = false;
+      });
     }
   }
 
   // 이미지 선택 옵션 표시
   void _showImageSourceActionSheet() {
-    if (_isSelectingImage) return;
+    if (_isSelectingImage || !mounted || _disposed) return;
     
     showCupertinoModalPopup(
       context: context,
@@ -222,13 +246,15 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
               },
               child: const Text('갤러리에서 선택'),
             ),
-            CupertinoActionSheetAction(
-              onPressed: () {
-                Navigator.pop(context);
-                _pickImageFromCamera();
-              },
-              child: const Text('카메라로 촬영'),
-            ),
+            // 🌐 웹에서는 카메라 옵션 숨기기
+            if (!kIsWeb)
+              CupertinoActionSheetAction(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _pickImageFromCamera();
+                },
+                child: const Text('카메라로 촬영'),
+              ),
           ],
           cancelButton: CupertinoActionSheetAction(
             isDestructiveAction: true,
@@ -242,58 +268,113 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
     );
   }
 
-  // 프로필 저장 메소드 - 수정된 부분
-  Future<void> _saveProfile() async {
-    if (_isNavigating) return; // 네비게이션 중복 방지
+  // 🔥 웹 안전한 네비게이션 함수
+  Future<void> _safeNavigateToMain() async {
+    if (!mounted || _disposed || _isNavigating) return;
     
-    setState(() {
+    _safeSetState(() {
+      _isNavigating = true;
+    });
+    
+    try {
+      if (kIsWeb) {
+        // 🌐 웹에서는 더 안전한 방식으로 네비게이션
+        debugPrint('🌐 웹: 메인 화면으로 안전한 네비게이션');
+        
+        await Future.delayed(const Duration(milliseconds: 100));
+        
+        if (mounted && !_disposed && context.mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            CupertinoPageRoute(builder: (context) => const MainTabScreen()),
+            (route) => false,
+          );
+        }
+      } else {
+        // 📱 모바일에서는 기존 방식
+        if (mounted && !_disposed) {
+          Navigator.of(context).pushAndRemoveUntil(
+            CupertinoPageRoute(builder: (context) => const MainTabScreen()),
+            (route) => false,
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('네비게이션 오류: $e');
+      if (mounted && !_disposed) {
+        final profileSetupNotifier = _safeRef(() => ref.read(profileSetupStateProvider.notifier));
+        profileSetupNotifier?.setError('화면 이동 중 오류가 발생했습니다.');
+        
+        _safeSetState(() {
+          _isNavigating = false;
+        });
+      }
+    }
+  }
+
+  // 🔥 웹 호환성 강화된 프로필 저장 메소드
+  Future<void> _saveProfile() async {
+    if (_isNavigating || _disposed || !mounted) return;
+    
+    _safeSetState(() {
       _nameError = false;
       _usernameError = false;
     });
 
     if (_nameController.text.isEmpty) {
-      setState(() => _nameError = true);
-      ref.read(profileSetupStateProvider.notifier).setError('이름은 필수입니다.');
+      _safeSetState(() => _nameError = true);
+      final profileSetupNotifier = _safeRef(() => ref.read(profileSetupStateProvider.notifier));
+      profileSetupNotifier?.setError('이름은 필수입니다.');
       return;
     }
     if (_usernameController.text.isEmpty) {
-      setState(() => _usernameError = true);
-      ref.read(profileSetupStateProvider.notifier).setError('사용자명은 필수입니다.');
+      _safeSetState(() => _usernameError = true);
+      final profileSetupNotifier = _safeRef(() => ref.read(profileSetupStateProvider.notifier));
+      profileSetupNotifier?.setError('사용자명은 필수입니다.');
       return;
     }
     if (!_isValidUsername(_usernameController.text)) {
-      setState(() => _usernameError = true);
-      ref.read(profileSetupStateProvider.notifier).setError('사용자명은 영문, 숫자, 언더스코어(_)만 사용할 수 있습니다.');
+      _safeSetState(() => _usernameError = true);
+      final profileSetupNotifier = _safeRef(() => ref.read(profileSetupStateProvider.notifier));
+      profileSetupNotifier?.setError('사용자명은 영문, 숫자, 언더스코어(_)만 사용할 수 있습니다.');
       return;
     }
 
-    // 상태 관리자 참조를 로컬 변수에 저장
-    final profileSetupNotifier = ref.read(profileSetupStateProvider.notifier);
-    final authRepository = ref.read(authRepositoryProvider);
-    final profileRepository = ref.read(profileRepositoryProvider);
-    final authController = ref.read(authControllerProvider.notifier);
+    // 🔥 안전한 ref 접근으로 변경
+    final profileSetupNotifier = _safeRef(() => ref.read(profileSetupStateProvider.notifier));
+    final authRepository = _safeRef(() => ref.read(authRepositoryProvider));
+    final profileRepository = _safeRef(() => ref.read(profileRepositoryProvider));
+    final authController = _safeRef(() => ref.read(authControllerProvider.notifier));
+
+    if (profileSetupNotifier == null || authRepository == null || 
+        profileRepository == null || authController == null) {
+      debugPrint('🔥 ref 접근 불가 - 위젯이 disposed됨');
+      return;
+    }
 
     // 진행 상태 설정
     profileSetupNotifier.startProfileCompletion();
     
-    // 네비게이션 플래그 설정
-    setState(() {
+    _safeSetState(() {
       _isNavigating = true;
     });
 
     try {
-      debugPrint('프로필 저장 시도: ${widget.userId}');
+      debugPrint('🔥 프로필 저장 시도: ${widget.userId}');
       
-      // 이미지 업로드
+      // 이미지 업로드 (웹에서는 건너뛸 수 있음)
       String? profileImageUrl;
       if (_profileImage != null) {
-        profileImageUrl = await profileRepository.uploadProfileImage(
-          widget.userId,
-          _profileImage!,
-        );
+        try {
+          profileImageUrl = await profileRepository.uploadProfileImage(
+            widget.userId,
+            _profileImage!,
+          );
+        } catch (e) {
+          debugPrint('🔥 이미지 업로드 실패 (무시하고 계속): $e');
+        }
       }
 
-      // 중요: 모든 데이터 저장 작업을 먼저 수행합니다
+      // 🔥 사용자 문서 생성
       await authRepository.createUserDocument(
         widget.userId,
         _nameController.text.trim(),
@@ -301,46 +382,65 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
         profileImageUrl,
       );
           
-      // 프로필 문서 생성 (소개 정보만 포함)
+      // 🔥 프로필 문서 생성
       await profileRepository.createProfileDocument(
         widget.userId,
         _bioController.text.trim(),
       );
       
-      // 중요 변경: 위젯 마운트 상태와 상관없이 프로필 완료 처리를 먼저 실행
-      // 이 작업은 백그라운드에서도 계속 진행되어야 함
-      await authController.completeProfileSetup(widget.userId);
-      
-      // 이 시점에서 위젯이 여전히 마운트 상태인지 확인
-      if (!mounted) {
-        debugPrint('위젯이 더 이상 마운트되지 않음 - 저장은 완료됨, UI 업데이트 중단');
-        return; // UI 업데이트는 중단하지만 프로필 설정은 이미 완료됨
+      // 🔥 위젯 상태 확인 후 프로필 완료 처리
+      if (!mounted || _disposed) {
+        debugPrint('🔥 위젯 disposed - 백그라운드에서 프로필 완료 처리');
+        // 백그라운드에서 완료 처리
+        try {
+          await authController.completeProfileSetup(widget.userId);
+        } catch (e) {
+          debugPrint('🔥 백그라운드 프로필 완료 실패: $e');
+        }
+        return;
       }
       
-      debugPrint('프로필 저장 성공, 피드로 이동');
+      // 🔥 프로필 완료 처리
+      await authController.completeProfileSetup(widget.userId);
+      
+      debugPrint('✅ 프로필 저장 성공, 메인 화면으로 이동');
       
       // UI 상태 업데이트
       profileSetupNotifier.completeProfileSetup();
       
-      // 메인 화면으로 이동
-      Navigator.of(context).pushAndRemoveUntil(
-        CupertinoPageRoute(builder: (context) => const MainTabScreen()),
-        (route) => false,
-      );
-    } catch (e) {
-      debugPrint('프로필 저장 실패: $e');
+      // 🔥 안전한 네비게이션
+      await _safeNavigateToMain();
       
-      // 위젯이 여전히 유효한지 확인 후 오류 메시지 표시
-      if (mounted) {
-        setState(() {
+    } catch (e) {
+      debugPrint('❌ 프로필 저장 실패: $e');
+      
+      if (mounted && !_disposed) {
+        _safeSetState(() {
           _isNavigating = false;
         });
-        profileSetupNotifier.setError('프로필 설정에 실패했습니다. 다시 시도해주세요. 오류: $e');
+        
+        // 🌐 웹에서 더 사용자 친화적인 오류 메시지
+        String errorMessage;
+        if (kIsWeb) {
+          if (e.toString().contains('permission') || e.toString().contains('denied')) {
+            errorMessage = '권한이 없습니다. 다시 로그인해주세요.';
+          } else if (e.toString().contains('network') || e.toString().contains('connection')) {
+            errorMessage = '네트워크 연결을 확인하고 다시 시도해주세요.';
+          } else {
+            errorMessage = '프로필 설정에 실패했습니다. 다시 시도해주세요.';
+          }
+        } else {
+          errorMessage = '프로필 설정에 실패했습니다. 다시 시도해주세요. 오류: $e';
+        }
+        
+        profileSetupNotifier.setError(errorMessage);
       }
     }
   }
 
   void _showSkipConfirmationDialog() {
+    if (!mounted || _disposed) return;
+    
     showCupertinoDialog(
       context: context,
       builder: (BuildContext dialogContext) {
@@ -366,28 +466,33 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
     );
   }
 
-  // 프로필 설정 건너뛰기 - 수정됨
+  // 🔥 웹 호환성 강화된 프로필 설정 건너뛰기
   Future<void> _skipProfile() async {
-    if (_isNavigating) return; // 네비게이션 중복 방지
+    if (_isNavigating || _disposed || !mounted) return;
     
-    // 상태 관리자 참조를 로컬 변수에 저장
-    final profileSetupNotifier = ref.read(profileSetupStateProvider.notifier);
-    final authRepository = ref.read(authRepositoryProvider);
-    final profileRepository = ref.read(profileRepositoryProvider);
-    final authController = ref.read(authControllerProvider.notifier);
+    // 🔥 안전한 ref 접근
+    final profileSetupNotifier = _safeRef(() => ref.read(profileSetupStateProvider.notifier));
+    final authRepository = _safeRef(() => ref.read(authRepositoryProvider));
+    final profileRepository = _safeRef(() => ref.read(profileRepositoryProvider));
+    final authController = _safeRef(() => ref.read(authControllerProvider.notifier));
     
-    setState(() {
+    if (profileSetupNotifier == null || authRepository == null || 
+        profileRepository == null || authController == null) {
+      debugPrint('🔥 ref 접근 불가 - 위젯이 disposed됨');
+      return;
+    }
+    
+    _safeSetState(() {
       _isNavigating = true;
     });
     
     profileSetupNotifier.startSkipping();
     
     try {
-      debugPrint('프로필 건너뛰기: ${widget.userId}');
+      debugPrint('🔥 프로필 건너뛰기: ${widget.userId}');
       final timestamp = DateTime.now().millisecondsSinceEpoch.toString().substring(6, 10);
       final defaultUsername = 'user_$timestamp';
       
-      // 중요: 프로필 데이터 저장 및 완료 처리
       await authRepository.createUserDocument(
         widget.userId, 
         'User', 
@@ -400,33 +505,43 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
         '프로필이 아직 설정되지 않았습니다.'
       );
       
-      // 중요 변경: 위젯 마운트 상태와 상관없이 프로필 완료 처리를 먼저 실행
-      await authController.completeProfileSetup(widget.userId);
-      
-      // 위젯 유효성 확인은 UI 관련 작업에만 영향을 줌
-      if (!mounted) {
-        debugPrint('위젯이 더 이상 마운트되지 않음 - 건너뛰기 처리는 완료됨, UI 업데이트 중단');
+      // 🔥 위젯 상태 확인 후 완료 처리
+      if (!mounted || _disposed) {
+        debugPrint('🔥 위젯 disposed - 백그라운드에서 건너뛰기 완료 처리');
+        try {
+          await authController.completeProfileSetup(widget.userId);
+        } catch (e) {
+          debugPrint('🔥 백그라운드 건너뛰기 완료 실패: $e');
+        }
         return;
       }
       
-      debugPrint('기본 프로필 생성 성공, 피드로 이동');
+      await authController.completeProfileSetup(widget.userId);
       
-      // UI 업데이트
+      debugPrint('✅ 기본 프로필 생성 성공, 메인 화면으로 이동');
+      
       profileSetupNotifier.skipProfileSetup();
       
-      // 메인 화면으로 이동
-      Navigator.of(context).pushAndRemoveUntil(
-        CupertinoPageRoute(builder: (context) => const MainTabScreen()),
-        (route) => false,
-      );
-    } catch (e) {
-      debugPrint('기본 프로필 생성 실패: $e');
+      // 🔥 안전한 네비게이션
+      await _safeNavigateToMain();
       
-      if (mounted) {
-        setState(() {
+    } catch (e) {
+      debugPrint('❌ 기본 프로필 생성 실패: $e');
+      
+      if (mounted && !_disposed) {
+        _safeSetState(() {
           _isNavigating = false;
         });
-        profileSetupNotifier.setError('기본 프로필 설정에 실패했습니다. 오류: $e');
+        
+        // 🌐 웹에서 더 사용자 친화적인 오류 메시지
+        String errorMessage;
+        if (kIsWeb) {
+          errorMessage = '기본 프로필 설정에 실패했습니다. 다시 시도해주세요.';
+        } else {
+          errorMessage = '기본 프로필 설정에 실패했습니다. 오류: $e';
+        }
+        
+        profileSetupNotifier.setError(errorMessage);
       }
     }
   }
@@ -436,34 +551,37 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
     const buttonHeight = 52.0;
     const circleSize = 120.0;
 
-    final profileSetupState = ref.watch(profileSetupStateProvider);
+    // 🔥 안전한 watch
+    final profileSetupState = _disposed ? ProfileSetupState() : ref.watch(profileSetupStateProvider);
 
-    // 상태 변경 감지 및 화면 전환 처리 - 수정됨
-    ref.listen<ProfileSetupState>(profileSetupStateProvider, (previous, next) {
-      if (mounted && (next.isCompleting || next.isSkipping) && next.errorMessage == null && !_isNavigating) {
-        setState(() {
-          _isNavigating = true;
-        });
-        
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            Navigator.of(context).pushAndRemoveUntil(
-              CupertinoPageRoute(builder: (context) => const MainTabScreen()),
-              (route) => false,
-            );
-            ref.read(profileSetupStateProvider.notifier).reset();
-          }
-        });
-      }
-    });
+    // 🔥 안전한 상태 변경 감지
+    if (!_disposed) {
+      ref.listen<ProfileSetupState>(profileSetupStateProvider, (previous, next) {
+        if (mounted && !_disposed && (next.isCompleting || next.isSkipping) && 
+            next.errorMessage == null && !_isNavigating) {
+          _safeSetState(() {
+            _isNavigating = true;
+          });
+          
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && !_disposed) {
+              _safeNavigateToMain().then((_) {
+                final notifier = _safeRef(() => ref.read(profileSetupStateProvider.notifier));
+                notifier?.reset();
+              });
+            }
+          });
+        }
+      });
+    }
 
     return PopScope(
       canPop: false,
       child: CupertinoPageScaffold(
         backgroundColor: AppColors.darkBackground,
         navigationBar: CupertinoNavigationBar(
-          backgroundColor: Colors.transparent, // 투명 배경
-          border: Border.all(color: Colors.transparent), // 테두리 제거
+          backgroundColor: Colors.transparent,
+          border: Border.all(color: Colors.transparent),
           middle: const Text(
             '프로필 설정',
             style: TextStyle(
@@ -498,7 +616,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
                                 shape: BoxShape.circle,
                                 border: Border.all(color: AppColors.separator, width: 2.0),
                               ),
-                              child: _profileImage != null
+                              child: _profileImage != null && !kIsWeb // 🌐 웹에서는 File 사용 제한
                                 ? ClipRRect(
                                     borderRadius: BorderRadius.circular(circleSize / 2),
                                     child: Image.file(
@@ -512,7 +630,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
                                   ? const CupertinoActivityIndicator()
                                   : Center(
                                       child: Image.asset(
-                                        'assets/images/hashtag_logo.png', // 앱 로고 이미지
+                                        'assets/images/hashtag_logo.png',
                                         width: 60,
                                         height: 60,
                                       ),
@@ -542,7 +660,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
                         padding: EdgeInsets.zero,
                         onPressed: _isSelectingImage ? null : _showImageSourceActionSheet,
                         child: Text(
-                          '이미지 선택하기',
+                          kIsWeb ? '이미지 선택하기 (웹)' : '이미지 선택하기',
                           style: TextStyle(
                             color: _isSelectingImage
                               ? AppColors.textSecondary
@@ -617,7 +735,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
                         enabled: !_isNavigating && !profileSetupState.isCompleting && !profileSetupState.isSkipping,
                         onChanged: (value) {
                           if (_nameError && value.isNotEmpty) {
-                            setState(() => _nameError = false);
+                            _safeSetState(() => _nameError = false);
                           }
                         },
                       ),
@@ -696,7 +814,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
                         enabled: !_isNavigating && !profileSetupState.isCompleting && !profileSetupState.isSkipping,
                         onChanged: (value) {
                           if (_usernameError && value.isNotEmpty) {
-                            setState(() => _usernameError = false);
+                            _safeSetState(() => _usernameError = false);
                           }
                         },
                       ),
@@ -782,7 +900,20 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
                       ? null
                       : _saveProfile,
                     child: (profileSetupState.isCompleting || _isNavigating)
-                      ? const CupertinoActivityIndicator(color: AppColors.white)
+                      ? const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            CupertinoActivityIndicator(color: AppColors.white),
+                            SizedBox(width: 8),
+                            Text(
+                              kIsWeb ? '저장 중...' : '처리 중...',
+                              style: TextStyle(
+                                color: AppColors.white,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        )
                       : const Text(
                           '프로필 저장',
                           style: TextStyle(
@@ -820,7 +951,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
                         CupertinoActivityIndicator(),
                         SizedBox(height: 8),
                         Text(
-                          '기본 프로필 설정 중...',
+                          kIsWeb ? '기본 프로필 설정 중...' : '처리 중...',
                           style: TextStyle(
                             color: AppColors.textEmphasis,
                             fontSize: 14,

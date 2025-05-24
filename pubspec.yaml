@@ -17,13 +17,13 @@ dependencies:
   flutter_riverpod: ^2.4.9
   
   # Firebase - 버전 업데이트됨
-  firebase_core: ^2.25.4
-  firebase_auth: ^4.17.4
-  cloud_firestore: ^4.17.5
-  firebase_storage: ^11.6.5
-  firebase_messaging: ^14.7.15
-  firebase_app_check: ^0.2.2+7
-  firebase_analytics: ^10.4.4
+  firebase_core: ^3.13.1
+  firebase_auth: ^5.5.4
+  cloud_firestore: ^5.6.8
+  firebase_storage: ^12.4.6
+  firebase_messaging: ^15.2.6
+  firebase_app_check: ^0.3.2+6
+  firebase_analytics: ^11.4.6
   
   # 구글 로그인
   google_sign_in: ^6.2.1
@@ -47,6 +47,8 @@ dependencies:
   timeago: ^3.7.1
   permission_handler: ^11.3.1
   url_launcher: ^6.2.5
+  image_picker_web: ^3.1.1
+  typed_data: ^1.4.0
 
   
   # UI 관련

@@ -872,7 +872,19 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
   }
   
   // 시스템 메시지 위젯 (새로 추가)
-  Widget _buildSystemMessage(dynamic message) {
+   Widget _buildSystemMessage(dynamic message) {
+    // 현재 사용자 확인
+    final currentUser = ref.read(currentUserProvider).valueOrNull;
+    
+    // metadata에서 viewerId 확인 - 특정 사용자만 볼 수 있는 메시지인 경우
+    if (message.metadata != null && message.metadata['viewerId'] != null) {
+      final viewerId = message.metadata['viewerId'];
+      if (currentUser != null && viewerId != currentUser.id) {
+        // 이 메시지는 다른 사용자를 위한 것이므로 표시하지 않음
+        return const SizedBox.shrink();
+      }
+    }
+    
     IconData icon;
     Color iconColor;
     

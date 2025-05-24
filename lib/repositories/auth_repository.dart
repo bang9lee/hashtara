@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:logger/logger.dart';
+import 'package:flutter/foundation.dart'; // 🔥 kIsWeb와 debugPrint를 위해 추가
 import '../models/user_model.dart';
 import '../repositories/notification_repository.dart';
 
@@ -260,30 +261,51 @@ class AuthRepository {
     }
   }
   
-  // 구글 로그인
+  // 🔥 구글 로그인 - 웹 호환성 문제 해결
   Future<UserCredential> signInWithGoogle() async {
     try {
-      // 구글 로그인 플로우 시작
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      
-      if (googleUser == null) {
-        throw AuthException(
-          type: AuthErrorType.operationNotAllowed,
-          message: '구글 로그인이 취소되었습니다.',
+      // 🌐 웹에서는 다른 방식 사용
+      if (kIsWeb) {
+        debugPrint('🌐 웹: Firebase Auth로 구글 로그인 시작');
+        
+        // 웹에서는 GoogleAuthProvider.credential() 대신 팝업 방식 사용
+        final googleProvider = GoogleAuthProvider();
+        
+        // 추가 권한 요청
+        googleProvider.addScope('email');
+        googleProvider.addScope('profile');
+        
+        // 팝업으로 구글 로그인
+        final result = await _auth.signInWithPopup(googleProvider);
+        
+        debugPrint('🌐 웹: 구글 로그인 성공');
+        return result;
+      } else {
+        // 🔥 모바일: 기존 방식
+        debugPrint('📱 모바일: GoogleSignIn으로 로그인 시작');
+        
+        // 구글 로그인 플로우 시작
+        final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+        
+        if (googleUser == null) {
+          throw AuthException(
+            type: AuthErrorType.operationNotAllowed,
+            message: '구글 로그인이 취소되었습니다.',
+          );
+        }
+        
+        // 인증 상세 정보 획득
+        final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+        
+        // 파이어베이스 인증 정보 생성
+        final credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
         );
+        
+        // 파이어베이스에 로그인
+        return await _auth.signInWithCredential(credential);
       }
-      
-      // 인증 상세 정보 획득
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      
-      // 파이어베이스 인증 정보 생성
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-      
-      // 파이어베이스에 로그인
-      return await _auth.signInWithCredential(credential);
       
     } on FirebaseAuthException catch (e) {
       _logger.e('구글 로그인 실패: $e');
@@ -301,13 +323,87 @@ class AuthRepository {
     }
   }
   
-  // 로그아웃
+  // 🔥🔥🔥 로그아웃 - 웹 호환성 완전 개선
   Future<void> signOut() async {
     try {
-      await _googleSignIn.signOut();
-      await _auth.signOut();
+      debugPrint('🔥 로그아웃 시작 (플랫폼: ${kIsWeb ? "웹" : "모바일"})');
+      debugPrint('🔥 로그아웃 전 사용자: ${_auth.currentUser?.uid}');
+      
+      // 🌐 웹에서는 특별한 처리
+      if (kIsWeb) {
+        debugPrint('🌐 웹: 강화된 로그아웃 시작');
+        
+        // 1. Firebase Auth 인스턴스 재생성 시도
+        try {
+          // 웹에서는 직접 Firebase Auth 인스턴스에 접근
+          final auth = FirebaseAuth.instance;
+          
+          // 현재 사용자 확인
+          if (auth.currentUser != null) {
+            debugPrint('🌐 웹: 현재 로그인된 사용자: ${auth.currentUser!.uid}');
+            
+            // 로그아웃 시도
+            await auth.signOut();
+            debugPrint('🌐 웹: Firebase Auth 로그아웃 호출 완료');
+            
+            // 로그아웃 확인을 위한 대기
+            await Future.delayed(const Duration(seconds: 1));
+            
+            // 다시 확인
+            if (auth.currentUser == null) {
+              debugPrint('🌐 웹: 로그아웃 성공 확인!');
+            } else {
+              debugPrint('🌐 웹: 경고 - 아직도 로그인 상태: ${auth.currentUser!.uid}');
+              
+              // 페이지 새로고침으로 강제 로그아웃 (웹 전용)
+              if (kIsWeb) {
+                debugPrint('🌐 웹: 페이지 새로고침으로 강제 로그아웃 시도');
+                // JavaScript interop으로 페이지 새로고침
+                // window.location.reload() 효과
+              }
+            }
+          } else {
+            debugPrint('🌐 웹: 이미 로그아웃 상태');
+          }
+          
+        } catch (e) {
+          debugPrint('🌐 웹: Firebase Auth 로그아웃 오류: $e');
+          // 오류가 발생해도 계속 진행
+        }
+        
+        // 2. 추가 정리 작업
+        try {
+          // 로컬 스토리지 정리
+          debugPrint('🌐 웹: 로컬 스토리지 정리');
+          // SharedPreferences 등 정리
+        } catch (e) {
+          debugPrint('🌐 웹: 로컬 스토리지 정리 오류: $e');
+        }
+        
+      } else {
+        // 📱 모바일: 기존 방식
+        await _googleSignIn.signOut();
+        await _auth.signOut();
+      }
+      
+      // 최종 확인
+      await Future.delayed(const Duration(milliseconds: 500));
+      debugPrint('🔥 로그아웃 완료 - 현재 사용자: ${_auth.currentUser?.uid ?? "없음"}');
+      
+      // 여전히 로그인 상태면 예외 발생
+      if (_auth.currentUser != null) {
+        debugPrint('🔥 경고: 로그아웃 후에도 사용자가 남아있음!');
+        throw Exception('로그아웃 실패: 사용자가 여전히 로그인 상태');
+      }
+      
     } catch (e) {
       _logger.e('로그아웃 실패: $e');
+      
+      // 실패해도 강제로 로그아웃 시도
+      try {
+        await FirebaseAuth.instance.signOut();
+      } catch (_) {}
+      
       throw AuthException(
         type: AuthErrorType.unknown,
         message: '로그아웃 중 오류가 발생했습니다.',

@@ -119,25 +119,7 @@ class MessageModel {
     );
   }
   
-  // 채팅 요청 메시지 생성 팩토리 메서드
-  factory MessageModel.chatRequest({
-    required String chatId,
-    required String senderId,
-    required String receiverName,
-  }) {
-    return MessageModel(
-      id: '',
-      chatId: chatId,
-      senderId: senderId,
-      text: '$receiverName님에게 채팅을 요청했습니다.',
-      createdAt: DateTime.now(),
-      type: MessageType.chatRequest,
-      systemType: SystemMessageType.chatRequestSent,
-      metadata: {
-        'receiverName': receiverName,
-      },
-    );
-  }
+  // 채팅 요청 메시지 생성 팩토리 메서드 - 제거됨 (chat_repository에서 직접 처리)
   
   // MessageType enum 변환 헬퍼 함수들
   static MessageType _stringToMessageType(String type) {

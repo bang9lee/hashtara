@@ -340,18 +340,47 @@ class ChatRepository {
           .collection('chats')
           .add(chat.toMap());
       
-      // 채팅 요청 메시지 생성
-      final requestMessage = MessageModel.chatRequest(
+      // 요청자와 수신자 이름 가져오기
+      final receiverName = await _getUserName(receiverId);
+      final requesterName = await _getUserName(requesterId);
+      
+      // 채팅 요청 메시지 생성 - 요청자가 보는 메시지
+      final requestMessageForSender = MessageModel.systemMessage(
         chatId: docRef.id,
-        senderId: requesterId,
-        receiverName: '상대방',
+        systemType: SystemMessageType.chatRequestSent,
+        text: '$receiverName님에게 채팅을 요청했습니다.',
+        metadata: {
+          'requesterId': requesterId,
+          'receiverId': receiverId,
+          'receiverName': receiverName,
+          'viewerId': requesterId, // 이 메시지를 볼 사람
+        },
       );
       
       await _firestore
           .collection('chats')
           .doc(docRef.id)
           .collection('messages')
-          .add(requestMessage.toMap());
+          .add(requestMessageForSender.toMap());
+      
+      // 채팅 요청 메시지 생성 - 수신자가 보는 메시지
+      final requestMessageForReceiver = MessageModel.systemMessage(
+        chatId: docRef.id,
+        systemType: SystemMessageType.chatRequestSent,
+        text: '$requesterName님이 채팅을 요청했습니다.',
+        metadata: {
+          'requesterId': requesterId,
+          'receiverId': receiverId,
+          'requesterName': requesterName,
+          'viewerId': receiverId, // 이 메시지를 볼 사람
+        },
+      );
+      
+      await _firestore
+          .collection('chats')
+          .doc(docRef.id)
+          .collection('messages')
+          .add(requestMessageForReceiver.toMap());
       
       // 수신자에게 알림 전송
       await _sendChatRequestNotification(requesterId, receiverId, docRef.id);
@@ -372,17 +401,30 @@ class ChatRepository {
     try {
       debugPrint('채팅 요청 수락 시도: $chatId');
       
+      // 채팅방 정보 가져오기
+      final chat = await getChatByIdOnce(chatId);
+      if (chat == null) {
+        throw Exception('채팅방을 찾을 수 없습니다.');
+      }
+      
+      // 수락한 사용자 이름 가져오기
+      final accepterName = await _getUserName(userId);
+      
       // 채팅방 상태 업데이트
       await _firestore.collection('chats').doc(chatId).update({
         'status': 'active',
         'acceptedAt': FieldValue.serverTimestamp(),
       });
       
-      // 시스템 메시지 추가
+      // 시스템 메시지 추가 - 수락한 사람 이름 포함
       final systemMessage = MessageModel.systemMessage(
         chatId: chatId,
         systemType: SystemMessageType.chatAccepted,
-        text: '채팅 요청이 수락되었습니다.',
+        text: '$accepterName님이 채팅 요청을 수락했습니다.',
+        metadata: {
+          'accepterId': userId,
+          'accepterName': accepterName,
+        },
       );
       
       await _firestore
@@ -617,16 +659,25 @@ class ChatRepository {
     }
   }
   
-  // 사용자 이름 가져오기 (헬퍼 메서드)
+  // 사용자 이름 가져오기 (헬퍼 메서드) - 수정됨
   Future<String> _getUserName(String userId) async {
     try {
       final userDoc = await _firestore.collection('users').doc(userId).get();
       if (userDoc.exists) {
         final data = userDoc.data() as Map<String, dynamic>;
-        return data['name'] ?? data['username'] ?? '알 수 없는 사용자';
+        final name = data['name'];
+        final username = data['username'];
+        
+        // 이름이 있으면 이름 사용, 없으면 @username 형식으로 표시
+        if (name != null && name.toString().trim().isNotEmpty) {
+          return name;
+        } else if (username != null && username.toString().trim().isNotEmpty) {
+          return '@$username';
+        }
       }
       return '알 수 없는 사용자';
     } catch (e) {
+      debugPrint('사용자 이름 가져오기 오류: $e');
       return '알 수 없는 사용자';
     }
   }

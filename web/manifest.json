@@ -1,11 +1,11 @@
 {
-    "name": "hashtara",
-    "short_name": "hashtara",
+    "name": "Hashtara",
+    "short_name": "Hashtara",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#ffffff",
-    "theme_color": "#000000",
-    "description": "A new Flutter project.",
+    "background_color": "#1a1a2e",
+    "theme_color": "#7b2cbf",
+    "description": "해시태그 기반 소셜 플랫폼",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

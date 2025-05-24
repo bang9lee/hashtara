@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart'; // 🔥 kIsWeb, debugPrint, Uint8List 포함
 import 'package:logger/logger.dart';
-import 'package:flutter/material.dart';
 import 'dart:io';
 import '../models/profile_model.dart';
 import '../models/user_model.dart';
@@ -20,12 +20,10 @@ class ProfileRepository {
       
       if (doc.exists) {
         debugPrint('프로필 조회 성공: $userId');
-        // 수정: DocumentSnapshot -> Map<String, dynamic> 변환 및 docId 추가
         return ProfileModel.fromFirestore(doc.data() ?? {}, doc.id);
       }
       
       debugPrint('프로필이 존재하지 않음: $userId');
-      // 프로필이 없으면 null 반환
       return null;
     } catch (e) {
       debugPrint('프로필 조회 실패: $e');
@@ -59,13 +57,11 @@ class ProfileRepository {
       final profileDoc = await _firestore.collection('profiles').doc(userId).get();
       
       if (profileDoc.exists) {
-        // 문서가 이미 존재하면 업데이트
         await _firestore.collection('profiles').doc(userId).update({
           'bio': bio,
         });
         debugPrint('기존 프로필 문서 업데이트: $userId');
       } else {
-        // 문서가 없으면 새로 생성
         final newProfile = ProfileModel(
           userId: userId,
           bio: bio,
@@ -77,7 +73,7 @@ class ProfileRepository {
         await _firestore
             .collection('profiles')
             .doc(userId)
-            .set(newProfile.toFirestore()); // toMap -> toFirestore 변경
+            .set(newProfile.toFirestore());
         debugPrint('새 프로필 문서 생성 완료: $userId');
       }
     } catch (e) {
@@ -94,16 +90,15 @@ class ProfileRepository {
       await _firestore
           .collection('profiles')
           .doc(profile.userId)
-          .update(profile.toFirestore()); // toMap -> toFirestore 변경
+          .update(profile.toFirestore());
       debugPrint('프로필 업데이트 성공');
     } catch (e) {
-      // 문서가 없는 경우 새로 만들기 시도
       try {
         debugPrint('프로필 문서가 없어 새로 생성: ${profile.userId}');
         await _firestore
             .collection('profiles')
             .doc(profile.userId)
-            .set(profile.toFirestore()); // toMap -> toFirestore 변경
+            .set(profile.toFirestore());
         debugPrint('프로필 문서 생성 성공');
       } catch (innerError) {
         debugPrint('프로필 업데이트/생성 실패: $innerError');
@@ -112,91 +107,107 @@ class ProfileRepository {
     }
   }
   
-  // 프로필 이미지 업로드 - 에러 처리 및 재시도 로직 보강
+  // 🔥 웹 호환성 강화된 프로필 이미지 업로드
   Future<String> uploadProfileImage(String userId, File imageFile) async {
     try {
-      debugPrint('프로필 이미지 업로드 시도: $userId');
-      debugPrint('이미지 파일 정보: 경로=${imageFile.path}, 크기=${await imageFile.length()} 바이트');
+      debugPrint('🔥 프로필 이미지 업로드 시도 (플랫폼: ${kIsWeb ? '웹' : '모바일'}): $userId');
       
       // Storage 참조 생성
       final ref = _storage.ref().child('profile_images').child('$userId.jpg');
       
-      // 이미지 파일 메타데이터 설정
-      final metadata = SettableMetadata(
-        contentType: 'image/jpeg',
-        cacheControl: 'public, max-age=3600',  // 1시간 캐싱
-        customMetadata: {
-          'userId': userId,
-          'uploadTime': DateTime.now().toIso8601String(),
-        },
-      );
+      // 🔥 웹과 모바일에서 다른 방식으로 업로드
+      late TaskSnapshot snapshot;
       
-      // 업로드 작업 시작
-      final uploadTask = ref.putFile(imageFile, metadata);
-      
-      // 업로드 진행 상황 모니터링
-      uploadTask.snapshotEvents.listen(
-        (TaskSnapshot snapshot) {
-          final progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          debugPrint('업로드 진행률: ${progress.toStringAsFixed(1)}%');
-        },
-        onError: (e) {
-          debugPrint('업로드 상태 모니터링 오류: $e');
-        },
-      );
-      
-      // 업로드 완료 대기
-      final snapshot = await uploadTask.whenComplete(() => 
-        debugPrint('프로필 이미지 업로드 작업 완료'));
+      if (kIsWeb) {
+        // 🌐 웹: Uint8List 사용
+        debugPrint('🌐 웹: Uint8List로 이미지 업로드');
+        
+        final Uint8List bytes = await imageFile.readAsBytes();
+        debugPrint('🌐 웹: 이미지 바이트 읽기 완료 (크기: ${bytes.length} 바이트)');
+        
+        final metadata = SettableMetadata(
+          contentType: 'image/jpeg',
+          cacheControl: 'no-cache, no-store, must-revalidate', // 🔥 캐시 비활성화
+          customMetadata: {
+            'userId': userId,
+            'uploadTime': DateTime.now().toIso8601String(),
+            'platform': 'web',
+          },
+        );
+        
+        final uploadTask = ref.putData(bytes, metadata);
+        snapshot = await uploadTask;
+        
+      } else {
+        // 📱 모바일: File 객체 사용
+        debugPrint('📱 모바일: File 객체로 이미지 업로드');
+        debugPrint('📱 이미지 파일 정보: 경로=${imageFile.path}, 크기=${await imageFile.length()} 바이트');
+        
+        final metadata = SettableMetadata(
+          contentType: 'image/jpeg',
+          cacheControl: 'public, max-age=3600',
+          customMetadata: {
+            'userId': userId,
+            'uploadTime': DateTime.now().toIso8601String(),
+            'platform': 'mobile',
+          },
+        );
+        
+        final uploadTask = ref.putFile(imageFile, metadata);
+        snapshot = await uploadTask;
+      }
       
       // URL 가져오기
       final imageUrl = await snapshot.ref.getDownloadURL();
+      debugPrint('✅ 프로필 이미지 업로드 성공: $imageUrl');
       
-      debugPrint('프로필 이미지 업로드 성공: $imageUrl');
+      // 🔥 사용자 문서 업데이트 (재시도 로직 포함)
+      await _updateUserProfileImage(userId, imageUrl);
       
-      // 재시도 최대 3회로 사용자 문서 업데이트
-      int retryCount = 0;
-      const maxRetries = 3;
-      
-      while (retryCount < maxRetries) {
-        try {
-          // 프로필 이미지 URL을 사용자 문서에 업데이트
-          await _firestore.collection('users').doc(userId).update({
-            'profileImageUrl': imageUrl,
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-          
-          debugPrint('사용자 문서 프로필 이미지 URL 업데이트 성공');
-          return imageUrl;  // 성공 시 URL 반환
-        } catch (e) {
-          retryCount++;
-          debugPrint('사용자 문서 업데이트 실패 ($retryCount/$maxRetries): $e');
-          
-          if (retryCount < maxRetries) {
-            // 지수 백오프 대기 (0.5초, 1초, 2초...)
-            final waitTime = Duration(milliseconds: 500 * (1 << (retryCount - 1)));
-            debugPrint('${waitTime.inMilliseconds}ms 후 재시도...');
-            await Future.delayed(waitTime);
-          }
-        }
-      }
-      
-      // 이미지는 업로드됐으나 문서 업데이트 실패
-      debugPrint('사용자 문서 업데이트 최대 재시도 횟수 초과');
-      debugPrint('이미지는 업로드되었으나 사용자 문서 업데이트는 실패함');
-      
-      // 이미지 URL은 반환 (부분 성공)
       return imageUrl;
+      
     } catch (e) {
-      debugPrint('프로필 이미지 업로드 중 오류 발생: $e');
+      debugPrint('❌ 프로필 이미지 업로드 중 오류 발생: $e');
       _logger.e('프로필 이미지 업로드 실패: $e');
       
-      // 상세 오류 정보 로깅
       if (e is FirebaseException) {
         debugPrint('Firebase 오류 코드: ${e.code}, 메시지: ${e.message}');
       }
       
       rethrow;
+    }
+  }
+  
+  // 🔥 사용자 프로필 이미지 URL 업데이트 (분리된 메서드)
+  Future<void> _updateUserProfileImage(String userId, String imageUrl) async {
+    int retryCount = 0;
+    const maxRetries = 3;
+    
+    while (retryCount < maxRetries) {
+      try {
+        debugPrint('사용자 문서 프로필 이미지 URL 업데이트 시도 (${retryCount + 1}/$maxRetries)');
+        
+        await _firestore.collection('users').doc(userId).update({
+          'profileImageUrl': imageUrl,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        
+        debugPrint('✅ 사용자 문서 프로필 이미지 URL 업데이트 성공');
+        return;
+        
+      } catch (e) {
+        retryCount++;
+        debugPrint('❌ 사용자 문서 업데이트 실패 ($retryCount/$maxRetries): $e');
+        
+        if (retryCount < maxRetries) {
+          final waitTime = Duration(milliseconds: 500 * (1 << (retryCount - 1)));
+          debugPrint('${waitTime.inMilliseconds}ms 후 재시도...');
+          await Future.delayed(waitTime);
+        } else {
+          debugPrint('❌ 사용자 문서 업데이트 최대 재시도 횟수 초과');
+          throw Exception('사용자 문서 업데이트 실패: $e');
+        }
+      }
     }
   }
   
@@ -214,7 +225,7 @@ class ProfileRepository {
       final count = snapshot.count;
       debugPrint('사용자 게시물 수: $count');
       
-      return count ?? 0; // null 체크 추가
+      return count ?? 0;
     } catch (e) {
       debugPrint('게시물 수 조회 실패: $e');
       return 0;
@@ -243,19 +254,18 @@ class ProfileRepository {
     }
   }
   
-  // 사용자 팔로우 - 권한 오류를 방지하기 위해 수정됨
+  // 사용자 팔로우
   Future<void> followUser(String followerId, String followingId) async {
     try {
       debugPrint('사용자 팔로우 시도: $followerId -> $followingId');
       
-      // 이미 팔로우 중인지 확인
       final isAlreadyFollowing = await checkIfFollowing(followerId, followingId);
       if (isAlreadyFollowing) {
         debugPrint('이미 팔로우 중인 사용자입니다');
         return;
       }
       
-      // 1. 팔로잉 관계 생성 - 자신의 following 컬렉션에 추가
+      // 1. 팔로잉 관계 생성
       await _firestore
           .collection('users')
           .doc(followerId)
@@ -267,7 +277,7 @@ class ProfileRepository {
           });
       debugPrint('팔로잉 관계 생성 성공');
       
-      // 2. 팔로워 관계 생성 - 상대방의 followers 컬렉션에 추가
+      // 2. 팔로워 관계 생성
       await _firestore
           .collection('users')
           .doc(followingId)
@@ -279,7 +289,7 @@ class ProfileRepository {
           });
       debugPrint('팔로워 관계 생성 성공');
       
-      // 3. 팔로잉 카운트 업데이트 - 자신의 프로필 문서
+      // 3. 팔로잉 카운트 업데이트
       try {
         final followerProfileRef = _firestore.collection('profiles').doc(followerId);
         final followerProfileDoc = await followerProfileRef.get();
@@ -293,7 +303,7 @@ class ProfileRepository {
         debugPrint('팔로잉 카운트 업데이트 실패 (계속 진행): $e');
       }
       
-      // 4. 팔로워 카운트 업데이트 - 상대방의 프로필 문서
+      // 4. 팔로워 카운트 업데이트
       try {
         final followingProfileRef = _firestore.collection('profiles').doc(followingId);
         final followingProfileDoc = await followingProfileRef.get();
@@ -309,13 +319,11 @@ class ProfileRepository {
       
       // 5. 알림 생성
       try {
-        // 팔로워 정보 가져오기
         final followerDoc = await _firestore.collection('users').doc(followerId).get();
         if (followerDoc.exists) {
           final followerData = followerDoc.data();
           final followerUsername = followerData?['username'] ?? '사용자';
           
-          // 알림 생성
           final notificationHandler = NotificationHandler();
           await notificationHandler.createFollowNotification(
             followerId: followerId,
@@ -335,19 +343,18 @@ class ProfileRepository {
     }
   }
   
-  // 사용자 언팔로우 - 권한 오류를 방지하기 위해 수정됨
+  // 사용자 언팔로우
   Future<void> unfollowUser(String followerId, String followingId) async {
     try {
       debugPrint('사용자 언팔로우 시도: $followerId -> $followingId');
       
-      // 팔로우 중인지 확인
       final isFollowing = await checkIfFollowing(followerId, followingId);
       if (!isFollowing) {
         debugPrint('팔로우 중이 아닌 사용자입니다');
         return;
       }
       
-      // 1. 팔로잉 관계 삭제 - 자신의 following 컬렉션에서 제거
+      // 1. 팔로잉 관계 삭제
       await _firestore
           .collection('users')
           .doc(followerId)
@@ -356,7 +363,7 @@ class ProfileRepository {
           .delete();
       debugPrint('팔로잉 관계 삭제 성공');
       
-      // 2. 팔로워 관계 삭제 - 상대방의 followers 컬렉션에서 제거
+      // 2. 팔로워 관계 삭제
       await _firestore
           .collection('users')
           .doc(followingId)
@@ -365,14 +372,13 @@ class ProfileRepository {
           .delete();
       debugPrint('팔로워 관계 삭제 성공');
       
-      // 3. 팔로잉 카운트 업데이트 - 자신의 프로필 문서
+      // 3. 팔로잉 카운트 업데이트
       try {
         final followerProfileRef = _firestore.collection('profiles').doc(followerId);
         final followerProfileDoc = await followerProfileRef.get();
         
         if (followerProfileDoc.exists) {
           final currentFollowingCount = followerProfileDoc.data()?['followingCount'] ?? 0;
-          // 음수가 되지 않도록 체크
           final newCount = currentFollowingCount > 0 ? currentFollowingCount - 1 : 0;
           await followerProfileRef.update({'followingCount': newCount});
           debugPrint('팔로잉 카운트 업데이트 성공');
@@ -381,14 +387,13 @@ class ProfileRepository {
         debugPrint('팔로잉 카운트 업데이트 실패 (계속 진행): $e');
       }
       
-      // 4. 팔로워 카운트 업데이트 - 상대방의 프로필 문서
+      // 4. 팔로워 카운트 업데이트
       try {
         final followingProfileRef = _firestore.collection('profiles').doc(followingId);
         final followingProfileDoc = await followingProfileRef.get();
         
         if (followingProfileDoc.exists) {
           final currentFollowersCount = followingProfileDoc.data()?['followersCount'] ?? 0;
-          // 음수가 되지 않도록 체크
           final newCount = currentFollowersCount > 0 ? currentFollowersCount - 1 : 0;
           await followingProfileRef.update({'followersCount': newCount});
           debugPrint('팔로워 카운트 업데이트 성공');
@@ -422,7 +427,6 @@ class ProfileRepository {
         return [];
       }
       
-      // 팔로워 사용자 정보 조회
       final followers = <UserModel>[];
       for (final id in followerIds) {
         try {
@@ -461,7 +465,6 @@ class ProfileRepository {
         return [];
       }
       
-      // 팔로잉 사용자 정보 조회
       final following = <UserModel>[];
       for (final id in followingIds) {
         try {

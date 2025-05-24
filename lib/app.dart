@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart'; // kIsWeb 추가
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'constants/app_colors.dart';
@@ -60,21 +61,35 @@ class _HashtaraAppState extends ConsumerState<HashtaraApp> with WidgetsBindingOb
     super.dispose();
   }
   
-  // 간단한 앱 초기화
+  // 🔥 웹 호환성을 위한 앱 초기화 수정
   Future<void> _initializeApp() async {
     try {
-      // 1. 알림 서비스 초기화
-      final notificationService = ref.read(notificationServiceProvider);
-      await notificationService.initialize();
+      // 🌐 웹에서는 알림 서비스 초기화 건너뛰기
+      if (!kIsWeb) {
+        debugPrint('📱 모바일: 알림 서비스 초기화 시작');
+        // 1. 알림 서비스 초기화 (모바일만)
+        final notificationService = ref.read(notificationServiceProvider);
+        await notificationService.initialize();
+        debugPrint('📱 모바일: 알림 서비스 초기화 완료');
+      } else {
+        debugPrint('🌐 웹: 알림 서비스 초기화 건너뛰기');
+      }
       
-      // 2. 저장된 회원가입 상태 불러오기
+      // 2. 저장된 회원가입 상태 불러오기 (모든 플랫폼)
       final savedState = await loadSignupProgress();
       if (savedState['userId'] != null) {
         ref.read(signupProgressProvider.notifier).state = savedState['progress'];
         debugPrint('저장된 회원가입 상태 복원: ${savedState['progress']}');
       }
+      
+      debugPrint('✅ 앱 초기화 완료 (플랫폼: ${kIsWeb ? '웹' : '모바일'})');
     } catch (e) {
-      debugPrint('앱 초기화 실패: $e');
+      debugPrint('❌ 앱 초기화 실패: $e');
+      
+      // 🌐 웹에서 초기화 실패해도 앱 실행 계속
+      if (kIsWeb) {
+        debugPrint('🌐 웹: 초기화 실패했지만 계속 진행');
+      }
     }
   }
 
@@ -169,7 +184,7 @@ class _HashtaraAppState extends ConsumerState<HashtaraApp> with WidgetsBindingOb
     final signupProgress = ref.watch(signupProgressProvider);
     
     // 디버그 로그 추가
-    debugPrint('HashtaraApp 리빌드됨 - AuthState: ${authState.runtimeType}, 진행상태: $signupProgress, 강제로그아웃: $forceLogout');
+    debugPrint('_buildHome 호출됨 - AuthState: ${authState.runtimeType}, 진행상태: $signupProgress, 강제로그아웃: $forceLogout');
     
     // 🔥🔥🔥 강제 로그아웃 최우선 처리 - 다른 모든 로직보다 우선
     if (forceLogout) {
@@ -235,6 +250,11 @@ class _HashtaraAppState extends ConsumerState<HashtaraApp> with WidgetsBindingOb
             },
             error: (error, stack) {
               debugPrint('🔥 CurrentUser 에러: $error');
+              // 🌐 웹에서는 에러가 발생해도 로딩 상태 유지
+              if (kIsWeb) {
+                debugPrint('🌐 웹: CurrentUser 에러 - 로딩 상태 유지');
+                return const SplashScreen();
+              }
               return const LoginScreen();
             },
           );
@@ -246,6 +266,11 @@ class _HashtaraAppState extends ConsumerState<HashtaraApp> with WidgetsBindingOb
       },
       error: (error, stack) {
         debugPrint('🔥 AuthState 에러: $error');
+        // 🌐 웹에서는 에러가 발생해도 로딩 상태 유지 (Firebase 초기화 지연 때문)
+        if (kIsWeb) {
+          debugPrint('🌐 웹: AuthState 에러 - 로딩 상태 유지');
+          return const SplashScreen();
+        }
         return const LoginScreen();
       },
     );

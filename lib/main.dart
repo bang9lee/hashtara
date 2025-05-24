@@ -1,19 +1,22 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'app.dart';
-import 'services/firebase_service.dart';
 import 'services/notification_service.dart';
+import 'firebase_options.dart';
 
 // 글로벌 NavigatorKey 정의
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-// 백그라운드 메시지 핸들러
+// 백그라운드 메시지 핸들러 (모바일만)
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  if (kIsWeb) return; // 웹에서는 실행하지 않음
+  
   await Firebase.initializeApp();
   debugPrint("🔔 백그라운드 메시지 수신: ${message.messageId}");
   debugPrint("🔔 알림 제목: ${message.notification?.title}");
@@ -26,24 +29,38 @@ void main() async {
   
   final logger = Logger();
   
-  // 상태바 색상 설정
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Color(0xFF0A0A1A),
-      statusBarIconBrightness: Brightness.light,
-    ),
-  );
+  // 🌐 웹에서는 상태바 설정 건너뛰기
+  if (!kIsWeb) {
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Color(0xFF0A0A1A),
+        statusBarIconBrightness: Brightness.light,
+      ),
+    );
+  }
   
   try {
-    // Firebase 초기화
-    await FirebaseService.initializeFirebase();
+    // 🔥 Firebase 초기화 - 웹과 모바일 통합
+    debugPrint('🔥 Firebase 초기화 시작 (플랫폼: ${kIsWeb ? "웹" : "모바일"})');
+    
+    // Firebase 초기화 (웹과 모바일 모두 동일)
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    
+    debugPrint('✅ Firebase 초기화 성공');
     logger.i("Firebase initialized successfully");
     
-    // FCM 백그라운드 핸들러 등록
-    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-    
-    // FCM 권한 요청 및 토큰 확인
-    await _setupFCM();
+    // 🌐 웹이 아닌 경우에만 FCM 설정
+    if (!kIsWeb) {
+      // FCM 백그라운드 핸들러 등록
+      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+      
+      // FCM 권한 요청 및 토큰 확인
+      await _setupFCM();
+    } else {
+      debugPrint('🌐 웹: FCM 설정 건너뛰기');
+    }
     
     // 에러 핸들링
     FlutterError.onError = (FlutterErrorDetails details) {
@@ -52,6 +69,9 @@ void main() async {
     
   } catch (e, stack) {
     logger.e("Failed to initialize Firebase: $e\n$stack");
+    debugPrint('❌ Firebase 초기화 실패: $e');
+    
+    // 🌐 웹에서도 에러 화면 표시
     runApp(
       const ProviderScope(
         child: FirebaseInitErrorApp(),
@@ -60,6 +80,7 @@ void main() async {
     return;
   }
   
+  // 정상적으로 앱 실행
   runApp(
     const ProviderScope(
       child: HashtaraApp(),
@@ -67,8 +88,14 @@ void main() async {
   );
 }
 
-// FCM 설정 및 토큰 확인
+// FCM 설정 및 토큰 확인 (모바일만)
 Future<void> _setupFCM() async {
+  // 웹에서는 FCM 설정 건너뛰기
+  if (kIsWeb) {
+    debugPrint('🌐 웹: FCM 설정 건너뛰기');
+    return;
+  }
+  
   try {
     // FCM 권한 요청
     final settings = await FirebaseMessaging.instance.requestPermission(

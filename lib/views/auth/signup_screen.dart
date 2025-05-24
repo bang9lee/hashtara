@@ -1,9 +1,10 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart'; // 🔥 kIsWeb 추가
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../constants/app_colors.dart';
 import '../../../constants/app_strings.dart';
 import '../../../providers/auth_provider.dart';
-import '../auth/terms_agreement_screen.dart'; // 약관 동의 화면 임포트 추가
+import '../auth/terms_agreement_screen.dart';
 
 class SignupScreen extends ConsumerStatefulWidget {
   const SignupScreen({Key? key}) : super(key: key);
@@ -19,7 +20,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   
   bool _isLoading = false;
   String? _errorMessage;
-  bool _navigationInProgress = false; // 중복 네비게이션 방지 플래그
+  bool _navigationInProgress = false;
   
   @override
   void initState() {
@@ -33,6 +34,48 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
+  }
+  
+  // 🔥 웹 안전한 네비게이션 함수
+  Future<void> _safeNavigate(Widget destination) async {
+    if (!mounted || _navigationInProgress) return;
+    
+    setState(() {
+      _navigationInProgress = true;
+    });
+    
+    try {
+      if (kIsWeb) {
+        // 🌐 웹에서는 더 안전한 방식으로 네비게이션
+        debugPrint('🌐 웹: 안전한 네비게이션 시작');
+        
+        // 약간의 지연을 두고 실행
+        await Future.delayed(const Duration(milliseconds: 100));
+        
+        if (mounted && context.mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            CupertinoPageRoute(builder: (context) => destination),
+            (route) => false,
+          );
+        }
+      } else {
+        // 📱 모바일에서는 기존 방식
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            CupertinoPageRoute(builder: (context) => destination),
+            (route) => false,
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('네비게이션 오류: $e');
+      if (mounted) {
+        setState(() {
+          _errorMessage = '화면 이동 중 오류가 발생했습니다.';
+          _navigationInProgress = false;
+        });
+      }
+    }
   }
   
   Future<void> _handleSignup() async {
@@ -53,7 +96,6 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       return;
     }
 
-    // 비밀번호 검증 (6자 이상)
     if (_passwordController.text.length < 6) {
       setState(() {
         _errorMessage = '비밀번호는 6자 이상이어야 합니다.';
@@ -61,7 +103,6 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       return;
     }
     
-    // 이메일 형식 검증
     final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
     if (!emailRegex.hasMatch(_emailController.text)) {
       setState(() {
@@ -76,33 +117,23 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     });
     
     try {
-      // 회원가입 실행
+      debugPrint('🔥 회원가입 시도: ${_emailController.text}');
+      
+      // 🔥 웹에서 안전한 회원가입 처리
       final user = await ref.read(authControllerProvider.notifier).signUp(
         _emailController.text.trim(),
         _passwordController.text,
       );
       
-      // 회원가입 성공 시 약관 동의 화면으로 이동 (수정된 부분)
       if (user != null && mounted) {
-        // 네비게이션 중복 방지 플래그 설정
-        setState(() {
-          _navigationInProgress = true;
-        });
-        
         debugPrint('회원가입 성공, 약관 동의 화면으로 즉시 이동: ${user.uid}');
         
-        // 회원가입 상태 설정 (중요!)
+        // 회원가입 상태 설정
         ref.read(signupProgressProvider.notifier).state = SignupProgress.registered;
         
-        // 화면 스택을 완전히 지우고 약관 동의 화면으로 강제 이동
-        Navigator.of(context).pushAndRemoveUntil(
-          CupertinoPageRoute(
-            builder: (context) => TermsAgreementScreen(
-              userId: user.uid,
-            ),
-          ),
-          (route) => false, // 모든 이전 화면 제거
-        );
+        // 🔥 웹 안전한 네비게이션 사용
+        await _safeNavigate(TermsAgreementScreen(userId: user.uid));
+        
       } else {
         if (mounted) {
           setState(() {
@@ -116,7 +147,20 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       debugPrint('회원가입 예외 발생: $e');
       if (mounted) {
         setState(() {
-          _errorMessage = '회원가입에 실패했습니다: ${e.toString()}';
+          // 🌐 웹에서 더 사용자 친화적인 오류 메시지
+          if (kIsWeb) {
+            if (e.toString().contains('email-already-in-use')) {
+              _errorMessage = '이미 사용 중인 이메일 주소입니다.';
+            } else if (e.toString().contains('weak-password')) {
+              _errorMessage = '비밀번호가 너무 약합니다. 더 강한 비밀번호를 사용해주세요.';
+            } else if (e.toString().contains('invalid-email')) {
+              _errorMessage = '유효하지 않은 이메일 주소입니다.';
+            } else {
+              _errorMessage = '회원가입에 실패했습니다. 다시 시도해주세요.';
+            }
+          } else {
+            _errorMessage = '회원가입에 실패했습니다: ${e.toString()}';
+          }
           _isLoading = false;
           _navigationInProgress = false;
         });
@@ -126,15 +170,13 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   
   @override
   Widget build(BuildContext context) {
-    // 화면 크기 정보 가져오기
     final mediaQuery = MediaQuery.of(context);
     final screenSize = mediaQuery.size;
     
-    // 디바이스 크기에 따른 패딩 및 크기 계산
-    final horizontalPadding = screenSize.width * 0.06; // 화면 너비의 6%
-    final buttonHeight = screenSize.height * 0.06; // 화면 높이의 6%
-    final verticalSpacing = screenSize.height * 0.02; // 화면 높이의 2%
-    final logoSize = screenSize.width * 0.4; // 화면 너비의 40%
+    final horizontalPadding = screenSize.width * 0.06;
+    final buttonHeight = screenSize.height * 0.06;
+    final verticalSpacing = screenSize.height * 0.02;
+    final logoSize = screenSize.width * 0.4;
     
     return CupertinoPageScaffold(
       backgroundColor: AppColors.darkBackground,
@@ -157,7 +199,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
             children: [
               SizedBox(height: verticalSpacing),
               
-              // 로고 추가
+              // 로고
               Center(
                 child: Container(
                   width: logoSize,
@@ -292,7 +334,20 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   borderRadius: BorderRadius.circular(12),
                   onPressed: _isLoading || _navigationInProgress ? null : _handleSignup,
                   child: _isLoading
-                    ? const CupertinoActivityIndicator(color: AppColors.white)
+                    ? const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          CupertinoActivityIndicator(color: AppColors.white),
+                          SizedBox(width: 8),
+                          Text(
+                            kIsWeb ? '가입 중...' : '처리 중...',
+                            style: TextStyle(
+                              color: AppColors.white,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      )
                     : const Text(
                         AppStrings.signup,
                         style: TextStyle(
@@ -341,7 +396,14 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   CupertinoButton(
                     padding: const EdgeInsets.only(left: 4),
                     onPressed: _navigationInProgress ? null : () {
-                      Navigator.pop(context);
+                      if (kIsWeb) {
+                        // 🌐 웹에서 안전한 뒤로가기
+                        if (mounted && context.mounted) {
+                          Navigator.pop(context);
+                        }
+                      } else {
+                        Navigator.pop(context);
+                      }
                     },
                     child: const Text(
                       AppStrings.login,

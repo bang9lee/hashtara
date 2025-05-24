@@ -93,29 +93,6 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
     });
   }
 
-  // 홈 탭 선택 시 홈 화면으로 이동하는 메서드
-  void _navigateToHome() {
-    // 현재 탭이 홈 탭이 아니면 홈 탭으로 변경
-    final currentIndex = ref.read(bottomNavIndexProvider);
-    if (currentIndex != 0) {
-      ref.read(bottomNavIndexProvider.notifier).state = 0;
-      return;
-    }
-    
-    // 이미 홈 탭에 있는 경우, 홈 네비게이터의 루트로 이동
-    final homeNavigator = homeNavigatorKey.currentState;
-    if (homeNavigator != null) {
-      homeNavigator.popUntil((route) => route.isFirst);
-      
-      // 홈 화면 초기화를 위해 피드 데이터 갱신
-      final feedRefresh = ref.refresh(feedPostsProvider);
-      debugPrint('홈 피드 데이터 갱신: ${feedRefresh.hashCode}');
-      
-      // UI 새로고침 트리거
-      ref.read(uiRefreshProvider.notifier).state += 1;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final currentIndex = ref.watch(bottomNavIndexProvider);
@@ -225,12 +202,6 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
         ],
         currentIndex: currentIndex,
         onTap: (index) {
-          // 홈 탭(0)을 탭하면 홈으로 이동하는 로직
-          if (index == 0) {
-            _navigateToHome();
-            return;
-          }
-          
           // 게시 버튼은 모달로 CreatePostScreen 열기
           if (index == 2) {
             showCupertinoModalPopup(
@@ -246,10 +217,49 @@ class _MainTabScreenState extends ConsumerState<MainTabScreen> {
             return; // 인덱스 변경 없음
           }
           
-          // 다른 탭은 인덱스 변경
-          ref.read(bottomNavIndexProvider.notifier).state = index;
+          // 🔥 탭 변경 시 항상 해당 탭의 루트로 이동
+          if (currentIndex == index && _navigatorKeys[index].currentState != null) {
+            // 같은 탭을 다시 누른 경우: 해당 탭의 루트로 이동
+            _navigatorKeys[index].currentState!.popUntil((route) => route.isFirst);
+            
+            // 각 탭별 데이터 갱신
+            if (index == 0) {
+              // 홈 탭: 피드 데이터 갱신
+              // ignore: unused_result
+              ref.refresh(feedPostsProvider);
+            } else if (index == 1) {
+              // 검색 탭: 필요시 검색 데이터 초기화
+              // ref.refresh(searchProvider);
+            } else if (index == 3) {
+              // 채팅 탭: 채팅 목록 갱신
+              final user = ref.read(currentUserProvider).valueOrNull;
+              if (user != null) {
+                // ignore: unused_result
+                ref.refresh(userChatsProvider(user.id));
+              }
+            } else if (index == 4) {
+              // 프로필 탭: 프로필 데이터 갱신
+              final user = ref.read(currentUserProvider).valueOrNull;
+              if (user != null) {
+                // ignore: unused_result
+                ref.refresh(getUserProfileProvider(user.id));
+                // ignore: unused_result
+                ref.refresh(userPostsProvider(user.id));
+              }
+            }
+          } else {
+            // 다른 탭으로 이동하는 경우
+            ref.read(bottomNavIndexProvider.notifier).state = index;
+            
+            // 🔥 탭 변경 직후 해당 탭의 루트로 이동
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_navigatorKeys[index].currentState != null) {
+                _navigatorKeys[index].currentState!.popUntil((route) => route.isFirst);
+              }
+            });
+          }
           
-          // 해당 탭으로 이동할 때 데이터 갱신
+          // 데이터 갱신
           _refreshAllData();
           
           // UI 강제 갱신 트리거

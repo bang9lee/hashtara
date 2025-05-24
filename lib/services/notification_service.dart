@@ -1,14 +1,16 @@
-// notification_service.dart - 모든 오류 수정된 최종 버전
+// notification_service.dart - 웹 호환성 문제 해결
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-// 전역 백그라운드 메시지 핸들러
+// 전역 백그라운드 메시지 핸들러 (모바일만)
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  if (kIsWeb) return; // 웹에서는 실행하지 않음
+  
   debugPrint("🔔 백그라운드 메시지 수신: ${message.notification?.title}");
   
   // 백그라운드에서도 로컬 알림 표시
@@ -56,7 +58,7 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
   static bool _initialized = false;
 
-  // 초기화
+  // 초기화 - 웹에서는 대부분 건너뜀
   Future<void> initialize() async {
     if (_initialized) {
       debugPrint('🔔 알림 서비스 이미 초기화됨');
@@ -66,7 +68,14 @@ class NotificationService {
     try {
       debugPrint('🔔 알림 서비스 초기화 시작');
       
-      // 1. FCM 권한 요청
+      // 🌐 웹에서는 알림 서비스 초기화 건너뛰기
+      if (kIsWeb) {
+        debugPrint('🌐 웹: 알림 서비스 초기화 건너뛰기');
+        _initialized = true;
+        return;
+      }
+      
+      // 1. FCM 권한 요청 (모바일만)
       final NotificationSettings settings = await _messaging.requestPermission(
         alert: true,
         badge: true,
@@ -121,11 +130,22 @@ class NotificationService {
       
     } catch (e) {
       debugPrint('❌ 알림 서비스 초기화 실패: $e');
+      
+      // 웹에서 오류가 발생해도 무시하고 계속 진행
+      if (kIsWeb) {
+        debugPrint('🌐 웹에서 알림 서비스 오류 무시');
+        _initialized = true;
+        return;
+      }
+      
+      rethrow;
     }
   }
   
-  // Android 알림 채널 생성
+  // Android 알림 채널 생성 (모바일만)
   Future<void> _createNotificationChannel() async {
+    if (kIsWeb) return;
+    
     const channel = AndroidNotificationChannel(
       'hashtara_notifications',
       'Hashtara 알림',
@@ -143,8 +163,10 @@ class NotificationService {
     debugPrint('✅ Android 알림 채널 생성 완료');
   }
   
-  // FCM 토큰 설정
+  // FCM 토큰 설정 (모바일만)
   Future<void> _setupFCMToken() async {
+    if (kIsWeb) return;
+    
     try {
       final token = await _messaging.getToken();
       if (token != null) {
@@ -186,8 +208,10 @@ class NotificationService {
     }
   }
   
-  // 메시지 리스너 설정
+  // 메시지 리스너 설정 (모바일만)
   void _setupMessageListeners() {
+    if (kIsWeb) return;
+    
     // 포그라운드 메시지 처리
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       debugPrint('📱 포그라운드 메시지 수신: ${message.notification?.title}');
@@ -209,10 +233,14 @@ class NotificationService {
     });
   }
   
-  // 로컬 알림 표시 (public 메서드로 변경)
+  // 로컬 알림 표시 (웹에서는 처리 안함)
   Future<void> showLocalNotification(RemoteMessage message) async {
+    if (kIsWeb) {
+      debugPrint('🌐 웹: 로컬 알림 건너뛰기');
+      return;
+    }
+    
     try {
-      // 동적 값을 포함하는 객체는 const 제거
       final androidDetails = AndroidNotificationDetails(
         'hashtara_notifications',
         'Hashtara 알림',
@@ -284,6 +312,8 @@ class NotificationService {
   
   // FCM 토큰 가져오기
   Future<String?> getToken() async {
+    if (kIsWeb) return null;
+    
     try {
       return await _messaging.getToken();
     } catch (e) {
@@ -299,6 +329,8 @@ class NotificationService {
   
   // 토큰 삭제 (로그아웃 시)
   Future<void> deleteToken() async {
+    if (kIsWeb) return;
+    
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
@@ -322,6 +354,8 @@ class NotificationService {
   
   // 배지 카운트 초기화
   Future<void> resetBadgeCount() async {
+    if (kIsWeb) return;
+    
     try {
       await _localNotifications.cancelAll();
       debugPrint('🔄 앱 배지 초기화 완료');
@@ -342,6 +376,11 @@ class NotificationService {
   
   // 테스트 알림 전송
   Future<void> sendTestNotification() async {
+    if (kIsWeb) {
+      debugPrint('🌐 웹: 테스트 알림 건너뛰기');
+      return;
+    }
+    
     try {
       await _localNotifications.show(
         999,
